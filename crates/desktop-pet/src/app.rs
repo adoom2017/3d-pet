@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 
 use winit::{
     application::ApplicationHandler,
@@ -10,11 +10,13 @@ use winit::{
 };
 
 use crate::{
+    animation::AnimationController,
     asset::{AssetManager, default_asset_root, default_manifest_path},
     config::AppConfig,
     error::AppError,
     platform::{self, PlatformBackend},
     render::{RenderOutcome, Renderer},
+    time::FIXED_UPDATE_INTERVAL,
 };
 
 pub const PET_WINDOW_LOGICAL_SIZE: f64 = 320.0;
@@ -70,6 +72,8 @@ pub struct Application {
     _platform_backend: Option<Box<dyn PlatformBackend>>,
     renderer: Option<Renderer>,
     _asset_manager: Option<AssetManager>,
+    animation: Option<AnimationController>,
+    next_animation_frame: Option<Instant>,
     redraw_pending: bool,
     redraw_request_logged: bool,
     has_presented_frame: bool,
@@ -85,6 +89,8 @@ impl Application {
             _platform_backend: None,
             renderer: None,
             _asset_manager: None,
+            animation: None,
+            next_animation_frame: None,
             redraw_pending: false,
             redraw_request_logged: false,
             has_presented_frame: false,
@@ -101,7 +107,9 @@ impl Application {
     }
 
     pub fn run(&mut self) -> Result<(), AppError> {
+        tracing::debug!("creating winit event loop");
         let event_loop = EventLoop::new()?;
+        tracing::debug!("winit event loop created");
         event_loop.set_control_flow(ControlFlow::Wait);
         event_loop.run_app(self)?;
 
@@ -125,7 +133,11 @@ impl Application {
         let pet = asset_manager
             .pet(pet_handle)
             .ok_or(crate::asset::AssetError::InvalidHandle)?;
+        let animation = AnimationController::idle(pet)
+            .map_err(|error| AppError::Animation(error.to_string()))?;
+        tracing::info!(idle_clip = animation.clip_name(), "Idle animation selected");
         renderer.upload_pet(pet);
+        renderer.update_skinning(animation.skin_matrices());
 
         let physical_size = window.inner_size();
         tracing::info!(
@@ -146,6 +158,8 @@ impl Application {
         self._platform_backend = Some(platform_backend);
         self.renderer = Some(renderer);
         self._asset_manager = Some(asset_manager);
+        self.animation = Some(animation);
+        self.next_animation_frame = Some(Instant::now() + FIXED_UPDATE_INTERVAL);
         self.redraw_pending = true;
         self.redraw_request_logged = false;
         if let Some(window) = self.window.as_ref() {
@@ -162,13 +176,29 @@ impl Application {
     }
 
     fn render_pending_frame(&mut self, event_loop: &ActiveEventLoop, window_id: WindowId) {
-        let Some(renderer) = self.renderer.as_mut() else {
-            return;
+        let result = {
+            let Some(renderer) = self.renderer.as_mut() else {
+                return;
+            };
+            renderer.render()
         };
-        match renderer.render() {
+        match result {
             Ok(RenderOutcome::Presented) => {
                 self.redraw_pending = false;
-                event_loop.set_control_flow(ControlFlow::Wait);
+                if let Some(animation) = self.animation.as_mut() {
+                    if let Err(error) = animation.advance(FIXED_UPDATE_INTERVAL) {
+                        self.fail_and_exit(event_loop, AppError::Animation(error.to_string()));
+                        return;
+                    }
+                    if let Some(renderer) = self.renderer.as_ref() {
+                        renderer.update_skinning(animation.skin_matrices());
+                    }
+                    self.next_animation_frame = Some(Instant::now() + FIXED_UPDATE_INTERVAL);
+                }
+                event_loop.set_control_flow(
+                    self.next_animation_frame
+                        .map_or(ControlFlow::Wait, ControlFlow::WaitUntil),
+                );
                 if self.has_presented_frame {
                     tracing::debug!(?window_id, "wgpu frame presented");
                 } else {
@@ -198,6 +228,7 @@ impl Application {
 
 impl ApplicationHandler for Application {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        tracing::debug!("winit application resumed");
         if self.window.is_none()
             && let Err(error) = self.create_window(event_loop)
         {
@@ -228,6 +259,8 @@ impl ApplicationHandler for Application {
                 tracing::debug!(?window_id, "window destroyed");
                 self.renderer = None;
                 self._asset_manager = None;
+                self.animation = None;
+                self.next_animation_frame = None;
                 self.window = None;
             }
             WindowEvent::Resized(size) => {
@@ -276,6 +309,16 @@ impl ApplicationHandler for Application {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        if !self.redraw_pending
+            && let Some(deadline) = self.next_animation_frame
+        {
+            if Instant::now() >= deadline {
+                self.redraw_pending = true;
+                event_loop.set_control_flow(ControlFlow::Poll);
+            } else {
+                event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
+            }
+        }
         if self.redraw_pending
             && let Some(window) = self.window.as_ref()
         {

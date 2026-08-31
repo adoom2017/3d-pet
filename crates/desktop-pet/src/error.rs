@@ -21,6 +21,9 @@ pub enum AppError {
 
     #[error("asset loading failed: {0}")]
     Asset(#[from] AssetError),
+
+    #[error("animation failed: {0}")]
+    Animation(String),
 }
 
 #[derive(Debug, Error)]

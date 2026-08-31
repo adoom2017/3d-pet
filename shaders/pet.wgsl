@@ -7,7 +7,12 @@ struct MaterialUniform {
     options: vec4<f32>,
 };
 
+struct SkinUniform {
+    joint_matrices: array<mat4x4<f32>, 128>,
+};
+
 @group(0) @binding(0) var<uniform> camera: CameraUniform;
+@group(0) @binding(1) var<uniform> skin: SkinUniform;
 @group(1) @binding(0) var<uniform> material: MaterialUniform;
 @group(1) @binding(1) var base_color_texture: texture_2d<f32>;
 @group(1) @binding(2) var base_color_sampler: sampler;
@@ -16,6 +21,8 @@ struct VertexInput {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
     @location(2) tex_coord: vec2<f32>,
+    @location(3) joints: vec4<u32>,
+    @location(4) weights: vec4<f32>,
 };
 
 struct VertexOutput {
@@ -27,8 +34,13 @@ struct VertexOutput {
 @vertex
 fn vs_main(input: VertexInput) -> VertexOutput {
     var output: VertexOutput;
-    output.position = camera.view_projection_model * vec4<f32>(input.position, 1.0);
-    output.normal = normalize(input.normal);
+    let skin_matrix =
+        skin.joint_matrices[input.joints.x] * input.weights.x +
+        skin.joint_matrices[input.joints.y] * input.weights.y +
+        skin.joint_matrices[input.joints.z] * input.weights.z +
+        skin.joint_matrices[input.joints.w] * input.weights.w;
+    output.position = camera.view_projection_model * skin_matrix * vec4<f32>(input.position, 1.0);
+    output.normal = normalize((skin_matrix * vec4<f32>(input.normal, 0.0)).xyz);
     output.tex_coord = input.tex_coord;
     return output;
 }

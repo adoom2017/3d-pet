@@ -1,13 +1,13 @@
 //! Trusted manifest and glTF/GLB loading boundary.
 
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
 };
 
 use bytemuck::{Pod, Zeroable};
-use glam::{Mat4, Vec3};
+use glam::{Mat4, Quat, Vec3};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -18,6 +18,7 @@ const MAX_NODES: usize = 2_048;
 const MAX_PRIMITIVES: usize = 256;
 const MAX_VERTICES: usize = 1_000_000;
 const MAX_INDICES: usize = 3_000_000;
+pub(crate) const MAX_JOINTS: usize = 128;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct PetAssetHandle(usize);
@@ -73,6 +74,14 @@ pub enum AssetError {
     },
     #[error("embedded image is invalid: {0}")]
     InvalidImage(#[from] image::ImageError),
+    #[error("skin data is invalid: {0}")]
+    InvalidSkin(&'static str),
+    #[error("animation channel is invalid: {0}")]
+    InvalidAnimation(&'static str),
+    #[error("animation interpolation {0:?} is not supported")]
+    UnsupportedInterpolation(gltf::animation::Interpolation),
+    #[error("morph target animation is not supported")]
+    UnsupportedMorphAnimation,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -116,6 +125,67 @@ pub(crate) struct CpuVertex {
     pub position: [f32; 3],
     pub normal: [f32; 3],
     pub tex_coord: [f32; 2],
+    pub joints: [u16; 4],
+    pub weights: [f32; 4],
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct LocalTransform {
+    pub translation: Vec3,
+    pub rotation: Quat,
+    pub scale: Vec3,
+}
+
+impl LocalTransform {
+    pub fn matrix(self) -> Mat4 {
+        Mat4::from_scale_rotation_translation(self.scale, self.rotation, self.translation)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct NodeData {
+    pub parent: Option<usize>,
+    pub bind_transform: LocalTransform,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct SkinData {
+    pub joints: Vec<usize>,
+    pub inverse_bind_matrices: Vec<Mat4>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum Interpolation {
+    Step,
+    Linear,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum ChannelValues {
+    Translations(Vec<Vec3>),
+    Rotations(Vec<Quat>),
+    Scales(Vec<Vec3>),
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct AnimationChannelData {
+    pub target_node: usize,
+    pub times: Vec<f32>,
+    pub interpolation: Interpolation,
+    pub values: ChannelValues,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct AnimationClipData {
+    pub name: String,
+    pub duration: f32,
+    pub channels: Vec<AnimationChannelData>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct RigData {
+    pub nodes: Vec<NodeData>,
+    pub skins: Vec<SkinData>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -161,6 +231,7 @@ pub(crate) struct MeshPrimitive {
     pub vertices: Vec<CpuVertex>,
     pub indices: Vec<u32>,
     pub material: MaterialData,
+    pub skin_index: Option<usize>,
 }
 
 #[derive(Debug)]
@@ -170,6 +241,8 @@ pub(crate) struct PetAsset {
     pub bounds_min: Vec3,
     pub bounds_max: Vec3,
     pub animation_names: HashSet<String>,
+    pub animations: HashMap<String, AnimationClipData>,
+    pub rig: RigData,
 }
 
 pub(crate) struct AssetManager {
@@ -306,11 +379,9 @@ fn parse_glb(manifest: PetManifest, bytes: &[u8]) -> Result<PetAsset, AssetError
     }
 
     let blob = gltf.blob.as_deref().ok_or(AssetError::MissingBinaryBlob)?;
-    let animation_names: HashSet<String> = gltf
-        .document
-        .animations()
-        .filter_map(|animation| animation.name().map(str::to_owned))
-        .collect();
+    let rig = read_rig(&gltf.document, blob)?;
+    let animations = read_animations(&gltf.document, blob)?;
+    let animation_names: HashSet<String> = animations.keys().cloned().collect();
     for (semantic, clip) in [
         ("idle", manifest.animations.idle.as_str()),
         ("walk", manifest.animations.walk.as_str()),
@@ -341,6 +412,26 @@ fn parse_glb(manifest: PetManifest, bytes: &[u8]) -> Result<PetAsset, AssetError
     if primitives.is_empty() {
         return Err(AssetError::LimitExceeded("asset has no mesh primitives"));
     }
+    for primitive in &primitives {
+        let Some(skin_index) = primitive.skin_index else {
+            continue;
+        };
+        let skin = rig
+            .skins
+            .get(skin_index)
+            .ok_or(AssetError::InvalidSkin("primitive skin index"))?;
+        if primitive.vertices.iter().any(|vertex| {
+            vertex
+                .joints
+                .iter()
+                .zip(vertex.weights)
+                .any(|(&joint, weight)| {
+                    weight > f32::EPSILON && usize::from(joint) >= skin.joints.len()
+                })
+        }) {
+            return Err(AssetError::InvalidSkin("vertex joint index"));
+        }
+    }
 
     Ok(PetAsset {
         manifest,
@@ -348,7 +439,137 @@ fn parse_glb(manifest: PetManifest, bytes: &[u8]) -> Result<PetAsset, AssetError
         bounds_min,
         bounds_max,
         animation_names,
+        animations,
+        rig,
     })
+}
+
+fn read_rig(document: &gltf::Document, blob: &[u8]) -> Result<RigData, AssetError> {
+    let mut nodes: Vec<NodeData> = document
+        .nodes()
+        .map(|node| {
+            let (translation, rotation, scale) = node.transform().decomposed();
+            NodeData {
+                parent: None,
+                bind_transform: LocalTransform {
+                    translation: Vec3::from(translation),
+                    rotation: Quat::from_array(rotation).normalize(),
+                    scale: Vec3::from(scale),
+                },
+            }
+        })
+        .collect();
+    for node in document.nodes() {
+        for child in node.children() {
+            nodes[child.index()].parent = Some(node.index());
+        }
+    }
+
+    let mut skins = Vec::new();
+    for skin in document.skins() {
+        let joints: Vec<usize> = skin.joints().map(|node| node.index()).collect();
+        if joints.is_empty() || joints.len() > MAX_JOINTS {
+            return Err(AssetError::InvalidSkin("joint count"));
+        }
+        let inverse_bind_matrices: Vec<Mat4> = skin
+            .reader(|buffer| match buffer.source() {
+                gltf::buffer::Source::Bin => Some(blob),
+                gltf::buffer::Source::Uri(_) => None,
+            })
+            .read_inverse_bind_matrices()
+            .map(|matrices| {
+                matrices
+                    .map(|matrix| Mat4::from_cols_array_2d(&matrix))
+                    .collect()
+            })
+            .unwrap_or_else(|| vec![Mat4::IDENTITY; joints.len()]);
+        if inverse_bind_matrices.len() != joints.len() {
+            return Err(AssetError::InvalidSkin("inverse bind matrix count"));
+        }
+        skins.push(SkinData {
+            joints,
+            inverse_bind_matrices,
+        });
+    }
+    Ok(RigData { nodes, skins })
+}
+
+fn read_animations(
+    document: &gltf::Document,
+    blob: &[u8],
+) -> Result<HashMap<String, AnimationClipData>, AssetError> {
+    let mut clips = HashMap::new();
+    for animation in document.animations() {
+        let Some(name) = animation.name().map(str::to_owned) else {
+            continue;
+        };
+        let mut duration = 0.0_f32;
+        let mut channels = Vec::new();
+        for channel in animation.channels() {
+            let reader = channel.reader(|buffer| match buffer.source() {
+                gltf::buffer::Source::Bin => Some(blob),
+                gltf::buffer::Source::Uri(_) => None,
+            });
+            let times: Vec<f32> = reader
+                .read_inputs()
+                .ok_or(AssetError::InvalidAnimation("missing input samples"))?
+                .collect();
+            if times.is_empty()
+                || times.iter().any(|time| !time.is_finite())
+                || times.windows(2).any(|pair| pair[0] > pair[1])
+            {
+                return Err(AssetError::InvalidAnimation("invalid input sample times"));
+            }
+            duration = duration.max(*times.last().expect("times is non-empty"));
+            let interpolation = match channel.sampler().interpolation() {
+                gltf::animation::Interpolation::Step => Interpolation::Step,
+                gltf::animation::Interpolation::Linear => Interpolation::Linear,
+                other => return Err(AssetError::UnsupportedInterpolation(other)),
+            };
+            let values = match reader
+                .read_outputs()
+                .ok_or(AssetError::InvalidAnimation("missing output samples"))?
+            {
+                gltf::animation::util::ReadOutputs::Translations(values) => {
+                    ChannelValues::Translations(values.map(Vec3::from).collect())
+                }
+                gltf::animation::util::ReadOutputs::Rotations(values) => ChannelValues::Rotations(
+                    values
+                        .into_f32()
+                        .map(|value| Quat::from_array(value).normalize())
+                        .collect(),
+                ),
+                gltf::animation::util::ReadOutputs::Scales(values) => {
+                    ChannelValues::Scales(values.map(Vec3::from).collect())
+                }
+                gltf::animation::util::ReadOutputs::MorphTargetWeights(_) => {
+                    return Err(AssetError::UnsupportedMorphAnimation);
+                }
+            };
+            let value_count = match &values {
+                ChannelValues::Translations(values) | ChannelValues::Scales(values) => values.len(),
+                ChannelValues::Rotations(values) => values.len(),
+            };
+            if value_count != times.len() {
+                return Err(AssetError::InvalidAnimation("input/output sample count"));
+            }
+            channels.push(AnimationChannelData {
+                target_node: channel.target().node().index(),
+                times,
+                interpolation,
+                values,
+            });
+        }
+        clips.insert(
+            name.clone(),
+            AnimationClipData {
+                name,
+                duration,
+                channels,
+            },
+        );
+    }
+    Ok(clips)
 }
 
 fn collect_node(
@@ -367,7 +588,12 @@ fn collect_node(
                 return Err(AssetError::LimitExceeded("primitive count"));
             }
             output.push(read_primitive(
-                primitive, world, blob, bounds_min, bounds_max,
+                primitive,
+                world,
+                node.skin().map(|skin| skin.index()),
+                blob,
+                bounds_min,
+                bounds_max,
             )?);
         }
     }
@@ -380,6 +606,7 @@ fn collect_node(
 fn read_primitive(
     primitive: gltf::Primitive<'_>,
     transform: Mat4,
+    skin_index: Option<usize>,
     blob: &[u8],
     bounds_min: &mut Vec3,
     bounds_max: &mut Vec3,
@@ -406,13 +633,30 @@ fn read_primitive(
         .read_tex_coords(0)
         .map(|values| values.into_f32().collect())
         .unwrap_or_else(|| vec![[0.0, 0.0]; positions.len()]);
+    let joints: Vec<[u16; 4]> = reader
+        .read_joints(0)
+        .map(|values| values.into_u16().collect())
+        .unwrap_or_else(|| vec![[0, 0, 0, 0]; positions.len()]);
+    let weights: Vec<[f32; 4]> = reader
+        .read_weights(0)
+        .map(|values| values.into_f32().collect())
+        .unwrap_or_else(|| vec![[1.0, 0.0, 0.0, 0.0]; positions.len()]);
+    if joints.len() != positions.len() || weights.len() != positions.len() {
+        return Err(AssetError::InvalidSkin("vertex attribute count"));
+    }
+    if skin_index.is_some() && (reader.read_joints(0).is_none() || reader.read_weights(0).is_none())
+    {
+        return Err(AssetError::InvalidSkin("missing vertex joints or weights"));
+    }
 
     let normal_transform = transform.inverse().transpose();
     let vertices: Vec<CpuVertex> = positions
         .into_iter()
         .zip(normals)
         .zip(tex_coords)
-        .map(|((position, normal), tex_coord)| {
+        .zip(joints)
+        .zip(weights)
+        .map(|((((position, normal), tex_coord), joints), weights)| {
             let position = transform.transform_point3(Vec3::from(position));
             let normal = normal_transform
                 .transform_vector3(Vec3::from(normal))
@@ -423,6 +667,8 @@ fn read_primitive(
                 position: position.to_array(),
                 normal: normal.to_array(),
                 tex_coord,
+                joints,
+                weights,
             }
         })
         .collect();
@@ -455,6 +701,7 @@ fn read_primitive(
             alpha_mode,
             double_sided: material.double_sided(),
         },
+        skin_index,
     })
 }
 
@@ -518,6 +765,14 @@ mod tests {
         assert_eq!(pet.manifest.skeleton.head_joint.as_deref(), Some("Head"));
         assert!(pet.animation_names.contains("Idle"));
         assert!(pet.animation_names.contains("Walk"));
+        assert!(!pet.animations["Idle"].channels.is_empty());
+        assert_eq!(pet.rig.skins.len(), 1);
+        assert!(pet.rig.skins[0].joints.len() <= MAX_JOINTS);
+        assert!(
+            pet.primitives
+                .iter()
+                .any(|primitive| primitive.skin_index == Some(0))
+        );
         assert!(!pet.primitives.is_empty());
         assert!(pet.bounds_min.cmplt(pet.bounds_max).all());
     }

@@ -22,7 +22,7 @@
 | 1 | 透明窗口 | Done |
 | 2 | wgpu 基线 | Done |
 | 3 | 静态 GLB | Done |
-| 4 | 骨骼与 Idle | Ready |
+| 4 | 骨骼与 Idle | In Progress |
 | 5 | Idle / Walk Cross Fade | Blocked |
 | 6 | 桌面移动 | Blocked |
 | 7 | PetBrain | Blocked |
@@ -211,7 +211,7 @@ evidence/
 
 ## 7. Phase 4：骨骼与 Idle
 
-**状态：`Ready`**
+**状态：`In Progress`**
 
 **目标：** 实现 skin、joint matrix、动画 channel 采样并稳定循环 Idle。
 

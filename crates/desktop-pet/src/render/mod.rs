@@ -22,12 +22,14 @@ use wgpu::{
 };
 use winit::{dpi::PhysicalSize, window::Window};
 
-use crate::asset::{AlphaMode, CpuVertex, PetAsset, SamplerData, TextureData, WrapMode};
+use crate::asset::{
+    AlphaMode, CpuVertex, MAX_JOINTS, PetAsset, SamplerData, TextureData, WrapMode,
+};
 
 const TRIANGLE_SHADER: &str = include_str!("../../../../shaders/triangle.wgsl");
 const PET_SHADER: &str = include_str!("../../../../shaders/pet.wgsl");
 const DEPTH_FORMAT: TextureFormat = TextureFormat::Depth32Float;
-const PET_VERTEX_ATTRIBUTES: [VertexAttribute; 3] = [
+const PET_VERTEX_ATTRIBUTES: [VertexAttribute; 5] = [
     VertexAttribute {
         format: VertexFormat::Float32x3,
         offset: 0,
@@ -42,6 +44,16 @@ const PET_VERTEX_ATTRIBUTES: [VertexAttribute; 3] = [
         format: VertexFormat::Float32x2,
         offset: 24,
         shader_location: 2,
+    },
+    VertexAttribute {
+        format: VertexFormat::Uint16x4,
+        offset: 32,
+        shader_location: 3,
+    },
+    VertexAttribute {
+        format: VertexFormat::Float32x4,
+        offset: 40,
+        shader_location: 4,
     },
 ];
 const TRANSPARENT_CLEAR: Color = Color {
@@ -111,14 +123,20 @@ struct GpuPrimitive {
     index_count: u32,
     material_bind_group: wgpu::BindGroup,
     double_sided: bool,
+    skin_binding_index: usize,
     _texture: wgpu::Texture,
     _sampler: wgpu::Sampler,
+}
+
+struct GpuSkin {
+    buffer: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
 }
 
 struct GpuPet {
     primitives: Vec<GpuPrimitive>,
     camera_buffer: wgpu::Buffer,
-    camera_bind_group: wgpu::BindGroup,
+    skins: Vec<GpuSkin>,
     bounds_min: Vec3,
     bounds_max: Vec3,
 }
@@ -301,14 +319,9 @@ impl Renderer {
                 )),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
-        let camera_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("DesktopPet camera bind group"),
-            layout: &self.camera_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: camera_buffer.as_entire_binding(),
-            }],
-        });
+        let skins = (0..=asset.rig.skins.len())
+            .map(|_| create_gpu_skin(&self.device, &self.camera_bind_group_layout, &camera_buffer))
+            .collect();
         let primitives = asset
             .primitives
             .iter()
@@ -335,10 +348,21 @@ impl Renderer {
         self.pet = Some(GpuPet {
             primitives,
             camera_buffer,
-            camera_bind_group,
+            skins,
             bounds_min: asset.bounds_min,
             bounds_max: asset.bounds_max,
         });
+    }
+
+    pub(crate) fn update_skinning(&self, skin_matrices: &[Vec<Mat4>]) {
+        let Some(pet) = self.pet.as_ref() else {
+            return;
+        };
+        for (gpu_skin, matrices) in pet.skins.iter().skip(1).zip(skin_matrices) {
+            let palette = joint_palette(matrices);
+            self.queue
+                .write_buffer(&gpu_skin.buffer, 0, bytemuck::cast_slice(&palette));
+        }
     }
 
     pub fn render(&mut self) -> Result<RenderOutcome, RendererError> {
@@ -415,16 +439,28 @@ impl Renderer {
 fn create_camera_bind_group_layout(device: &Device) -> BindGroupLayout {
     device.create_bind_group_layout(&BindGroupLayoutDescriptor {
         label: Some("DesktopPet camera bind group layout"),
-        entries: &[BindGroupLayoutEntry {
-            binding: 0,
-            visibility: ShaderStages::VERTEX,
-            ty: BindingType::Buffer {
-                ty: BufferBindingType::Uniform,
-                has_dynamic_offset: false,
-                min_binding_size: None,
+        entries: &[
+            BindGroupLayoutEntry {
+                binding: 0,
+                visibility: ShaderStages::VERTEX,
+                ty: BindingType::Buffer {
+                    ty: BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
             },
-            count: None,
-        }],
+            BindGroupLayoutEntry {
+                binding: 1,
+                visibility: ShaderStages::VERTEX,
+                ty: BindingType::Buffer {
+                    ty: BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+        ],
     })
 }
 
@@ -584,6 +620,42 @@ fn write_camera_uniform(
     );
 }
 
+fn create_gpu_skin(
+    device: &Device,
+    layout: &BindGroupLayout,
+    camera_buffer: &wgpu::Buffer,
+) -> GpuSkin {
+    let palette = joint_palette(&[]);
+    let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("DesktopPet joint palette"),
+        contents: bytemuck::cast_slice(&palette),
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+    });
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("DesktopPet camera and skin bind group"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: camera_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: buffer.as_entire_binding(),
+            },
+        ],
+    });
+    GpuSkin { buffer, bind_group }
+}
+
+fn joint_palette(matrices: &[Mat4]) -> Vec<[[f32; 4]; 4]> {
+    let mut palette = vec![Mat4::IDENTITY.to_cols_array_2d(); MAX_JOINTS];
+    for (target, matrix) in palette.iter_mut().zip(matrices) {
+        *target = matrix.to_cols_array_2d();
+    }
+    palette
+}
+
 fn upload_primitive(
     device: &Device,
     queue: &Queue,
@@ -635,6 +707,7 @@ fn upload_primitive(
         index_count: primitive.indices.len() as u32,
         material_bind_group,
         double_sided: primitive.material.double_sided,
+        skin_binding_index: primitive.skin_index.map_or(0, |index| index + 1),
         _texture: texture,
         _sampler: sampler,
     }
@@ -762,13 +835,13 @@ fn encode_pet_pass(
         }),
         ..Default::default()
     });
-    pass.set_bind_group(0, &pet.camera_bind_group, &[]);
     for primitive in &pet.primitives {
         pass.set_pipeline(if primitive.double_sided {
             double_sided_pipeline
         } else {
             pipeline
         });
+        pass.set_bind_group(0, &pet.skins[primitive.skin_binding_index].bind_group, &[]);
         pass.set_bind_group(1, &primitive.material_bind_group, &[]);
         pass.set_vertex_buffer(0, primitive.vertex_buffer.slice(..));
         pass.set_index_buffer(primitive.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
@@ -974,14 +1047,15 @@ mod tests {
             )),
             usage: wgpu::BufferUsages::UNIFORM,
         });
-        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("offscreen pet camera bind group"),
-            layout: &camera_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: camera_buffer.as_entire_binding(),
-            }],
-        });
+        let skins: Vec<GpuSkin> = (0..=asset.rig.skins.len())
+            .map(|_| create_gpu_skin(&device, &camera_layout, &camera_buffer))
+            .collect();
+        let controller = crate::animation::AnimationController::idle(asset)
+            .expect("default Idle animation must initialize");
+        for (gpu_skin, matrices) in skins.iter().skip(1).zip(controller.skin_matrices()) {
+            let palette = joint_palette(matrices);
+            queue.write_buffer(&gpu_skin.buffer, 0, bytemuck::cast_slice(&palette));
+        }
         let pet = GpuPet {
             primitives: asset
                 .primitives
@@ -989,7 +1063,7 @@ mod tests {
                 .map(|primitive| upload_primitive(&device, &queue, &material_layout, primitive))
                 .collect(),
             camera_buffer,
-            camera_bind_group,
+            skins,
             bounds_min: asset.bounds_min,
             bounds_max: asset.bounds_max,
         };
