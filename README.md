@@ -1,6 +1,6 @@
 # DesktopPet
 
-DesktopPet is a lightweight 3D desktop pet for macOS with Windows compile-and-test support. Phase 2's wgpu renderer now presents a colored triangle over a truly transparent window, and Phase 3 is ready to add the first static GLB pet. macOS is the runtime, visual, and interaction reference platform; Windows is continuously checked by CI.
+DesktopPet is a lightweight 3D desktop pet for macOS with Windows compile-and-test support. The current Phase 3 build validates and renders a static Quaternius Fox GLB with materials, depth, automatic camera framing, and a truly transparent window. macOS is the runtime, visual, and interaction reference platform; Windows is continuously checked by CI.
 
 ## Prerequisites
 
@@ -17,7 +17,7 @@ cargo build --workspace
 cargo run -p desktop-pet
 ```
 
-The application opens a persistent 320 x 320 transparent window. Close the window normally or press Escape to exit through the clean shutdown path.
+The application opens a persistent 320 x 320 transparent window containing the static default Fox. Close the window normally or press Escape to exit through the clean shutdown path.
 
 ## Verification
 

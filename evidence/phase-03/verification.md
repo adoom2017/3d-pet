@@ -1,6 +1,6 @@
 # Phase 3 verification
 
-Status: `Verifying`
+Status: `Done`
 
 Implementation commit: `2938c0b18fdf06e200ac23996e1624fde4582ef1`
 
@@ -50,4 +50,9 @@ The first surface acquisition can report `Occluded` while the hidden startup win
 
 ## CI acceptance
 
-Pending the verification commit's GitHub Actions macOS/Windows matrix.
+| Date | Commit | Platform | Result | Evidence |
+| --- | --- | --- | --- | --- |
+| 2026-08-31 | `981fef7f3f27214828f8d2ecf18f92ac960c121f` | `macos-latest` | Pass (1m25s) | <https://github.com/adoom2017/3d-pet/actions/runs/33353754622> |
+| 2026-08-31 | `981fef7f3f27214828f8d2ecf18f92ac960c121f` | `windows-latest` | Pass (2m28s) | <https://github.com/adoom2017/3d-pet/actions/runs/33353754622> |
+
+The trusted asset record, macOS runtime and visual acceptance, deterministic asset and renderer tests, local gates, and both CI jobs passed. Phase 3 is `Done`; Phase 4 is `Ready`.

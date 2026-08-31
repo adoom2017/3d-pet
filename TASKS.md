@@ -21,8 +21,8 @@
 | 0 | 工程基线 | Done |
 | 1 | 透明窗口 | Done |
 | 2 | wgpu 基线 | Done |
-| 3 | 静态 GLB | Verifying |
-| 4 | 骨骼与 Idle | Blocked |
+| 3 | 静态 GLB | Done |
+| 4 | 骨骼与 Idle | Ready |
 | 5 | Idle / Walk Cross Fade | Blocked |
 | 6 | 桌面移动 | Blocked |
 | 7 | PetBrain | Blocked |
@@ -178,7 +178,7 @@ evidence/
 
 ## 6. Phase 3：静态 GLB
 
-**状态：`Verifying`**
+**状态：`Done`**
 
 **目标：** 通过受校验的 manifest 加载 Quaternius CC0 GLB，并渲染静态网格、纹理和材质。
 
@@ -211,7 +211,7 @@ evidence/
 
 ## 7. Phase 4：骨骼与 Idle
 
-**状态：`Blocked`**
+**状态：`Ready`**
 
 **目标：** 实现 skin、joint matrix、动画 channel 采样并稳定循环 Idle。
 
