@@ -6,7 +6,7 @@ use std::{
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
-    event::{ElementState, WindowEvent},
+    event::{ElementState, MouseButton, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     keyboard::{KeyCode, PhysicalKey},
     window::{Window, WindowAttributes, WindowId, WindowLevel},
@@ -16,8 +16,12 @@ use crate::{
     animation::{AnimationController, AnimationRequest},
     asset::{AssetManager, default_asset_root, default_manifest_path},
     config::AppConfig,
-    display::{DisplayManager, LogicalSize as DesktopLogicalSize},
+    display::{
+        DisplayManager, LogicalSize as DesktopLogicalSize, PhysicalSize as DesktopPhysicalSize,
+    },
     error::AppError,
+    input::MouseState,
+    interaction::{DEFAULT_HIT_PADDING_LOGICAL, HitRegion, InteractionController, RectHitRegion},
     pet::{
         BehaviorStateMachine, BrainConfig, HorizontalDirection, MonotonicClock, MovementController,
         PetAnimationIntent, PetBrain, PetIntent, PetObservation, PetState, PetStateMachine,
@@ -106,6 +110,8 @@ pub struct Application {
     animation: Option<AnimationController>,
     movement: Option<MovementController>,
     display_manager: Option<DisplayManager>,
+    mouse_state: MouseState,
+    interaction: InteractionController,
     brain: Option<WanderingPetBrain>,
     brain_rng: SplitMix64,
     state_machine: Option<BehaviorStateMachine>,
@@ -131,6 +137,8 @@ impl Application {
             animation: None,
             movement: None,
             display_manager: None,
+            mouse_state: MouseState::default(),
+            interaction: InteractionController::default(),
             brain: None,
             brain_rng: SplitMix64::seeded(DEFAULT_BRAIN_SEED),
             state_machine: None,
@@ -188,6 +196,7 @@ impl Application {
             .map_err(|error| AppError::Platform(error.to_string()))?;
         log_monitor_snapshot(&display_manager);
         let mut renderer = pollster::block_on(Renderer::new(Arc::clone(&window)))?;
+        renderer.set_pet_scale(self.config.scale);
         let mut asset_manager = AssetManager::new(default_asset_root())?;
         let pet_handle = asset_manager.load_pet(&default_manifest_path())?;
         let pet = asset_manager
@@ -224,6 +233,8 @@ impl Application {
         self.animation = Some(animation);
         self.movement = Some(MovementController::new(initial_position));
         self.display_manager = Some(display_manager);
+        self.mouse_state = MouseState::default();
+        self.interaction = InteractionController::default();
         self.brain = Some(
             WanderingPetBrain::new(BrainConfig::default())
                 .map_err(|error| AppError::Behavior(error.to_string()))?,
@@ -280,9 +291,13 @@ impl Application {
                         boundary.position.x, boundary.position.y
                     ))
                 })?;
-            Ok::<_, AppError>((boundary.position, boundary.turn))
+            Ok::<_, AppError>((boundary.position, boundary))
         })?;
-        if let Some(Some(turn)) = boundary {
+        if let Some(boundary) = boundary {
+            self.mouse_state.update_window_origin(boundary.position);
+            self.update_pointer_hit();
+        }
+        if let Some(Some(turn)) = boundary.map(|boundary| boundary.turn) {
             tracing::info!(?turn, "desktop work-area boundary requested a turn");
             self.apply_pet_intent(
                 PetIntent::Turn { direction: turn },
@@ -308,6 +323,38 @@ impl Application {
             log_monitor_snapshot(display_manager);
         }
         Ok(())
+    }
+
+    fn update_pointer_hit(&mut self) {
+        let region = self
+            .renderer
+            .as_ref()
+            .and_then(|renderer| {
+                let scale_factor = self.window.as_ref()?.scale_factor();
+                renderer.pet_projection(scale_factor)
+            })
+            .and_then(|projection| {
+                RectHitRegion::from_pet_projection(projection, DEFAULT_HIT_PADDING_LOGICAL)
+            });
+        let update = self.interaction.update_hit(
+            self.mouse_state.window_logical_position,
+            region.as_ref().map(|region| region as &dyn HitRegion),
+        );
+        if update.changed {
+            tracing::info!(
+                hit = update.hit,
+                window_logical = ?self.mouse_state.window_logical_position,
+                desktop = ?self.mouse_state.desktop_position,
+                region = ?region,
+                "pet pointer hit changed"
+            );
+        } else {
+            tracing::trace!(
+                hit = update.hit,
+                window_logical = ?self.mouse_state.window_logical_position,
+                "pet pointer hit evaluated"
+            );
+        }
     }
 
     fn apply_movement_command(&mut self, key: KeyCode) {
@@ -370,6 +417,7 @@ impl Application {
                 _ => movement.stop(),
             }
         }
+        self.update_pointer_hit();
         tracing::info!(?transition, "pet state transition applied");
         if let Some(window) = self.window.as_ref() {
             let title = match (transition.next, direction) {
@@ -530,6 +578,8 @@ impl ApplicationHandler for Application {
                 self.animation = None;
                 self.movement = None;
                 self.display_manager = None;
+                self.mouse_state = MouseState::default();
+                self.interaction = InteractionController::default();
                 self.brain = None;
                 self.state_machine = None;
                 self.platform_backend = None;
@@ -547,6 +597,7 @@ impl ApplicationHandler for Application {
                 if let Some(renderer) = self.renderer.as_mut() {
                     renderer.resize(size);
                 }
+                self.update_pointer_hit();
                 self.redraw_pending = size.width > 0 && size.height > 0;
                 event_loop.set_control_flow(if self.redraw_pending {
                     ControlFlow::Poll
@@ -566,7 +617,40 @@ impl ApplicationHandler for Application {
                     self.fail_and_exit(event_loop, error);
                     return;
                 }
+                self.update_pointer_hit();
                 event_loop.set_control_flow(ControlFlow::Poll);
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                let window_origin = self
+                    .movement
+                    .as_ref()
+                    .map(MovementController::position)
+                    .unwrap_or_default();
+                if let Some(window) = self.window.as_ref() {
+                    let size = window.inner_size();
+                    self.mouse_state.update_cursor_physical(
+                        [position.x, position.y],
+                        window_origin,
+                        window.scale_factor(),
+                        DesktopPhysicalSize::new(size.width, size.height),
+                    );
+                    self.update_pointer_hit();
+                }
+            }
+            WindowEvent::CursorLeft { .. } => {
+                self.mouse_state.clear_cursor();
+                self.update_pointer_hit();
+            }
+            WindowEvent::MouseInput {
+                state,
+                button: MouseButton::Left,
+                ..
+            } => {
+                self.mouse_state
+                    .set_left_pressed(state == ElementState::Pressed);
+            }
+            WindowEvent::ModifiersChanged(modifiers) => {
+                self.mouse_state.set_modifiers(modifiers.state());
             }
             WindowEvent::RedrawRequested => {
                 tracing::debug!(?window_id, "processing pending wgpu redraw");

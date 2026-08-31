@@ -504,8 +504,7 @@ impl MovementController {
         Ok(Some(output))
     }
 
-    #[cfg(test)]
-    fn position(&self) -> DesktopPosition {
+    pub fn position(&self) -> DesktopPosition {
         self.body.position
     }
 }

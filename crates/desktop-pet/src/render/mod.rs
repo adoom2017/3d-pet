@@ -25,6 +25,7 @@ use winit::{dpi::PhysicalSize, window::Window};
 use crate::asset::{
     AlphaMode, CpuVertex, MAX_JOINTS, PetAsset, SamplerData, TextureData, WrapMode,
 };
+use crate::display::PhysicalSize as DesktopPhysicalSize;
 use crate::pet::HorizontalDirection;
 
 const TRIANGLE_SHADER: &str = include_str!("../../../../shaders/triangle.wgsl");
@@ -112,6 +113,15 @@ struct CameraUniform {
     model: [[f32; 4]; 4],
 }
 
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct PetProjection {
+    pub bounds_min: Vec3,
+    pub bounds_max: Vec3,
+    pub clip_from_model: Mat4,
+    pub viewport: DesktopPhysicalSize,
+    pub scale_factor: f64,
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct MaterialUniform {
@@ -170,6 +180,7 @@ pub struct Renderer {
     material_bind_group_layout: wgpu::BindGroupLayout,
     pet: Option<GpuPet>,
     facing: HorizontalDirection,
+    pet_scale: f32,
     depth_target: DepthTarget,
     config: SurfaceConfiguration,
     configured: bool,
@@ -281,6 +292,7 @@ impl Renderer {
             material_bind_group_layout,
             pet: None,
             facing: HorizontalDirection::Right,
+            pet_scale: 1.0,
             depth_target,
             config,
             configured,
@@ -303,9 +315,9 @@ impl Renderer {
                 &pet.camera_buffer,
                 pet.bounds_min,
                 pet.bounds_max,
-                size.width,
-                size.height,
+                size,
                 self.facing,
+                self.pet_scale,
             );
         }
         self.configure_surface();
@@ -322,6 +334,7 @@ impl Renderer {
                     self.config.width,
                     self.config.height,
                     self.facing,
+                    self.pet_scale,
                 )),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
@@ -371,11 +384,49 @@ impl Renderer {
                 &pet.camera_buffer,
                 pet.bounds_min,
                 pet.bounds_max,
-                self.config.width,
-                self.config.height,
+                PhysicalSize::new(self.config.width, self.config.height),
                 direction,
+                self.pet_scale,
             );
         }
+    }
+
+    pub(crate) fn set_pet_scale(&mut self, scale: f64) {
+        debug_assert!(scale.is_finite() && scale > 0.0);
+        self.pet_scale = scale as f32;
+        if let Some(pet) = self.pet.as_ref() {
+            write_camera_uniform(
+                &self.queue,
+                &pet.camera_buffer,
+                pet.bounds_min,
+                pet.bounds_max,
+                PhysicalSize::new(self.config.width, self.config.height),
+                self.facing,
+                self.pet_scale,
+            );
+        }
+    }
+
+    pub(crate) fn pet_projection(&self, scale_factor: f64) -> Option<PetProjection> {
+        let pet = self.pet.as_ref()?;
+        if !self.configured || !scale_factor.is_finite() || scale_factor <= 0.0 {
+            return None;
+        }
+        let uniform = camera_uniform(
+            pet.bounds_min,
+            pet.bounds_max,
+            self.config.width,
+            self.config.height,
+            self.facing,
+            self.pet_scale,
+        );
+        Some(PetProjection {
+            bounds_min: pet.bounds_min,
+            bounds_max: pet.bounds_max,
+            clip_from_model: Mat4::from_cols_array_2d(&uniform.view_projection_model),
+            viewport: DesktopPhysicalSize::new(self.config.width, self.config.height),
+            scale_factor,
+        })
     }
 
     pub(crate) fn update_skinning(&self, skin_matrices: &[Vec<Mat4>]) {
@@ -613,6 +664,7 @@ fn camera_uniform(
     width: u32,
     height: u32,
     facing: HorizontalDirection,
+    pet_scale: f32,
 ) -> CameraUniform {
     let center = (bounds_min + bounds_max) * 0.5;
     let radius = ((bounds_max - bounds_min).length() * 0.5).max(0.001);
@@ -630,7 +682,7 @@ fn camera_uniform(
     let near = (distance - radius * 1.5).max(0.01);
     let far = distance + radius * 2.5;
     let projection = Mat4::perspective_rh(vertical_fov, aspect, near, far);
-    let model = match facing {
+    let facing_model = match facing {
         HorizontalDirection::Left => Mat4::IDENTITY,
         HorizontalDirection::Right => {
             let view_center = view.transform_point3(center);
@@ -641,6 +693,10 @@ fn camera_uniform(
                 * view
         }
     };
+    let scale_model = Mat4::from_translation(center)
+        * Mat4::from_scale(Vec3::splat(pet_scale))
+        * Mat4::from_translation(-center);
+    let model = facing_model * scale_model;
     CameraUniform {
         view_projection_model: (projection * view * model).to_cols_array_2d(),
         model: model.to_cols_array_2d(),
@@ -652,15 +708,20 @@ fn write_camera_uniform(
     buffer: &wgpu::Buffer,
     bounds_min: Vec3,
     bounds_max: Vec3,
-    width: u32,
-    height: u32,
+    viewport: PhysicalSize<u32>,
     facing: HorizontalDirection,
+    pet_scale: f32,
 ) {
     queue.write_buffer(
         buffer,
         0,
         bytemuck::bytes_of(&camera_uniform(
-            bounds_min, bounds_max, width, height, facing,
+            bounds_min,
+            bounds_max,
+            viewport.width,
+            viewport.height,
+            facing,
+            pet_scale,
         )),
     );
 }
@@ -1020,14 +1081,16 @@ mod tests {
                 320,
                 320,
                 HorizontalDirection::Right,
+                1.0,
             ),
-            camera_uniform(Vec3::ZERO, Vec3::ZERO, 0, 0, HorizontalDirection::Left),
+            camera_uniform(Vec3::ZERO, Vec3::ZERO, 0, 0, HorizontalDirection::Left, 1.0),
             camera_uniform(
                 Vec3::new(-4.0, -1.0, -1.0),
                 Vec3::ONE,
                 160,
                 320,
                 HorizontalDirection::Right,
+                1.0,
             ),
         ] {
             assert!(
@@ -1049,6 +1112,7 @@ mod tests {
             320,
             320,
             HorizontalDirection::Right,
+            1.0,
         );
         let left = camera_uniform(
             Vec3::splat(-1.0),
@@ -1056,8 +1120,32 @@ mod tests {
             320,
             320,
             HorizontalDirection::Left,
+            1.0,
         );
         assert_ne!(right.model, left.model);
+    }
+
+    #[test]
+    fn pet_scale_changes_the_model_transform_used_for_render_and_hit_projection() {
+        let normal = camera_uniform(
+            Vec3::splat(-1.0),
+            Vec3::splat(1.0),
+            320,
+            320,
+            HorizontalDirection::Left,
+            1.0,
+        );
+        let enlarged = camera_uniform(
+            Vec3::splat(-1.0),
+            Vec3::splat(1.0),
+            320,
+            320,
+            HorizontalDirection::Left,
+            1.5,
+        );
+
+        assert_ne!(normal.model, enlarged.model);
+        assert_ne!(normal.view_projection_model, enlarged.view_projection_model);
     }
 
     #[test]
@@ -1122,6 +1210,7 @@ mod tests {
                 WIDTH,
                 HEIGHT,
                 HorizontalDirection::Right,
+                1.0,
             )),
             usage: wgpu::BufferUsages::UNIFORM,
         });

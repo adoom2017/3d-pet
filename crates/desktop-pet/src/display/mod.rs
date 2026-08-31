@@ -28,6 +28,18 @@ pub(crate) struct LogicalSize {
     pub height: f64,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct PhysicalSize {
+    pub width: u32,
+    pub height: u32,
+}
+
+impl PhysicalSize {
+    pub const fn new(width: u32, height: u32) -> Self {
+        Self { width, height }
+    }
+}
+
 impl LogicalSize {
     pub const fn new(width: f64, height: f64) -> Self {
         Self { width, height }
@@ -139,6 +151,53 @@ impl DisplayManager {
 
     pub fn monitors(&self) -> &[MonitorInfo] {
         &self.monitors
+    }
+
+    pub fn desktop_to_window_logical(
+        desktop: DesktopPosition,
+        window_origin: DesktopPosition,
+    ) -> Option<[f64; 2]> {
+        if !desktop.is_finite() || !window_origin.is_finite() {
+            return None;
+        }
+        Some([desktop.x - window_origin.x, desktop.y - window_origin.y])
+    }
+
+    pub fn window_logical_to_physical(logical: [f64; 2], scale_factor: f64) -> Option<[f64; 2]> {
+        if !logical.into_iter().all(f64::is_finite)
+            || !scale_factor.is_finite()
+            || scale_factor <= 0.0
+        {
+            return None;
+        }
+        Some([logical[0] * scale_factor, logical[1] * scale_factor])
+    }
+
+    pub fn window_physical_to_logical(physical: [f64; 2], scale_factor: f64) -> Option<[f64; 2]> {
+        if !physical.into_iter().all(f64::is_finite)
+            || !scale_factor.is_finite()
+            || scale_factor <= 0.0
+        {
+            return None;
+        }
+        Some([physical[0] / scale_factor, physical[1] / scale_factor])
+    }
+
+    pub fn physical_to_ndc(physical: [f64; 2], viewport: PhysicalSize) -> Option<[f64; 2]> {
+        if viewport.width == 0
+            || viewport.height == 0
+            || !physical.into_iter().all(f64::is_finite)
+            || physical[0] < 0.0
+            || physical[1] < 0.0
+            || physical[0] > f64::from(viewport.width)
+            || physical[1] > f64::from(viewport.height)
+        {
+            return None;
+        }
+        Some([
+            2.0 * physical[0] / f64::from(viewport.width) - 1.0,
+            1.0 - 2.0 * physical[1] / f64::from(viewport.height),
+        ])
     }
 
     pub fn active_monitor(
@@ -348,6 +407,47 @@ mod tests {
                 converted.work_area_size,
                 LogicalSize::new(logical.2, logical.3)
             );
+        }
+    }
+
+    #[test]
+    fn coordinate_pipeline_handles_negative_desktop_origin_and_retina_scale() {
+        let desktop = DesktopPosition::new(-1234.5, 220.25);
+        let window = DesktopPosition::new(-1280.0, 160.0);
+        let logical = DisplayManager::desktop_to_window_logical(desktop, window)
+            .expect("finite desktop coordinates");
+        let physical =
+            DisplayManager::window_logical_to_physical(logical, 2.0).expect("valid Retina scale");
+        let ndc = DisplayManager::physical_to_ndc(physical, PhysicalSize::new(640, 640))
+            .expect("point inside viewport");
+
+        assert_eq!(logical, [45.5, 60.25]);
+        assert_eq!(physical, [91.0, 120.5]);
+        assert_eq!(ndc, [-0.715625, 0.6234375]);
+        assert_eq!(
+            DisplayManager::window_physical_to_logical(physical, 2.0),
+            Some(logical)
+        );
+    }
+
+    #[test]
+    fn ndc_conversion_includes_edges_and_rejects_invalid_viewports_and_points() {
+        let viewport = PhysicalSize::new(400, 200);
+        assert_eq!(
+            DisplayManager::physical_to_ndc([0.0, 0.0], viewport),
+            Some([-1.0, 1.0])
+        );
+        assert_eq!(
+            DisplayManager::physical_to_ndc([400.0, 200.0], viewport),
+            Some([1.0, -1.0])
+        );
+        for (point, size) in [
+            ([-0.1, 20.0], viewport),
+            ([401.0, 20.0], viewport),
+            ([f64::NAN, 20.0], viewport),
+            ([1.0, 1.0], PhysicalSize::new(0, 200)),
+        ] {
+            assert_eq!(DisplayManager::physical_to_ndc(point, size), None);
         }
     }
 

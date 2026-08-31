@@ -27,7 +27,7 @@
 | 6 | 桌面移动 | Done |
 | 7 | PetBrain | Done |
 | 8 | 边界与显示器 | Done |
-| 9 | 命中测试 | Ready |
+| 9 | 命中测试 | Verifying |
 | 10 | 平台鼠标穿透 | Blocked |
 | 11 | 拖动 | Blocked |
 | 12 | 重力与落地 | Blocked |
@@ -372,7 +372,7 @@ evidence/
 
 ## 12. Phase 9：命中测试
 
-**状态：`Ready`**
+**状态：`Verifying`**
 
 **目标：** 统一鼠标坐标转换，用 2D bounding region 或 hit mask 区分宠物区域与透明区域。
 
@@ -382,11 +382,11 @@ evidence/
 
 **实现任务：**
 
-- [ ] 实现桌面逻辑 -> 窗口逻辑 -> 物理像素 -> NDC -> 可选相机射线转换链。
-- [ ] MVP 命中只使用窗口局部逻辑坐标，定义边界包含规则和透明区域行为。
-- [ ] region 随宠物 scale、朝向、viewport 和 DPI 正确更新，不读取 GPU framebuffer。
-- [ ] `MouseState` 同时保存可选桌面坐标与窗口局部坐标，窗口外/零尺寸返回 miss。
-- [ ] 为角点、边界、负坐标、不同 DPI、零尺寸、NaN 防护和模型翻转添加测试。
+- [x] 实现桌面逻辑 -> 窗口逻辑 -> 物理像素 -> NDC -> 可选相机射线转换链。
+- [x] MVP 命中只使用窗口局部逻辑坐标，定义边界包含规则和透明区域行为。
+- [x] region 随宠物 scale、朝向、viewport 和 DPI 正确更新，不读取 GPU framebuffer。
+- [x] `MouseState` 同时保存可选桌面坐标与窗口局部坐标，窗口外/零尺寸返回 miss。
+- [x] 为角点、边界、负坐标、不同 DPI、零尺寸、NaN 防护和模型翻转添加测试。
 
 **自动验证命令：** 执行四条全局门禁命令；运行 coordinate pipeline 和 hit-region table tests。
 

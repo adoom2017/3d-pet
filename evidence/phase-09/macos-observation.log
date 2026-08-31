@@ -1,0 +1,20 @@
+Phase 9 macOS hit-test observation
+Date: 2026-08-31
+Platform: macOS 26.6.2 (25G83), arm64, Apple M5, Retina 2x
+Build: local debug candidate based on 9afd159
+
+Observed window and render configuration:
+logical_size=320x320 physical_size=640x640 scale_factor=2.0
+adapter=Apple M5 backend=Metal
+
+Representative real pointer transitions:
+2026-08-31T08:57:36.627488Z INFO pet pointer hit changed hit=true window_logical=Some([70.0, 81.98046875]) desktop=Some(DesktopPosition { x: 666.0, y: 255.98046875 }) region=Some(RectHitRegion { min: [56.859134674072266, 52.35299491882324], max: [233.14523315429688, 235.26437377929688] })
+2026-08-31T08:57:36.752479Z INFO pet pointer hit changed hit=false window_logical=Some([54.0, 219.98046875]) desktop=Some(DesktopPosition { x: 651.33333328, y: 393.98046875 }) region=Some(RectHitRegion { min: [56.859134674072266, 52.35299491882324], max: [233.14523315429688, 235.26437377929688] })
+
+The first point was inside the projected fox bounds. The second point was in the
+transparent area immediately left of the projected minimum X and correctly missed.
+The same logical region was derived from a 640x640 physical viewport at scale 2.0.
+
+Result: Pass. Hit/miss changed only at the projected boundary; the transparent window
+continued to render and move while window-local coordinates updated relative to the
+stable desktop cursor position.
