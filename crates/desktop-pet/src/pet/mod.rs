@@ -63,6 +63,8 @@ pub(crate) enum PetIntent {
     Turn { direction: HorizontalDirection },
     LookAt { desktop_target: DesktopPosition },
     Interact,
+    BeginDrag,
+    EndDrag,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -84,6 +86,9 @@ impl TransitionContext {
     };
     pub const EXPLICIT: Self = Self {
         priority: TransitionPriority::Explicit,
+    };
+    pub const DRAG: Self = Self {
+        priority: TransitionPriority::Drag,
     };
 }
 
@@ -239,7 +244,22 @@ impl PetStateMachine for BehaviorStateMachine {
                 self.interaction_elapsed = Duration::ZERO;
                 self.transition_to(PetState::Interacting, None, PetAnimationIntent::Idle)
             }
-            PetIntent::Interact | PetIntent::LookAt { .. } => {
+            PetIntent::BeginDrag if context.priority >= TransitionPriority::Drag => {
+                self.pending_walk = None;
+                self.turn_elapsed = Duration::ZERO;
+                self.interaction_elapsed = Duration::ZERO;
+                self.transition_to(PetState::Dragged, None, PetAnimationIntent::Idle)
+            }
+            PetIntent::EndDrag
+                if self.state == PetState::Dragged
+                    && context.priority >= TransitionPriority::Drag =>
+            {
+                self.transition_to(PetState::Idle, None, PetAnimationIntent::Idle)
+            }
+            PetIntent::Interact
+            | PetIntent::LookAt { .. }
+            | PetIntent::BeginDrag
+            | PetIntent::EndDrag => {
                 StateTransition::rejected(self.state, TransitionRejection::UnsupportedIntent)
             }
         }
@@ -499,6 +519,22 @@ impl MovementController {
         self.body.velocity_logical_px_per_s[0] = 0.0;
     }
 
+    pub fn begin_drag(&mut self) {
+        self.state = MovementState::Idle;
+        self.body.velocity_logical_px_per_s = [0.0, 0.0];
+        self.body.grounded = false;
+    }
+
+    pub fn confirm_drag_position(&mut self, position: DesktopPosition) {
+        self.confirm_position(position);
+    }
+
+    pub fn finish_drag(&mut self, release_velocity: [f64; 2]) {
+        self.state = MovementState::Idle;
+        self.body.velocity_logical_px_per_s = release_velocity;
+        self.body.grounded = false;
+    }
+
     fn proposed_position(&self, delta: Duration) -> DesktopPosition {
         self.body.proposed_position(delta)
     }
@@ -524,6 +560,11 @@ impl MovementController {
 
     pub fn position(&self) -> DesktopPosition {
         self.body.position
+    }
+
+    #[cfg(test)]
+    fn body(&self) -> PhysicsBody {
+        self.body
     }
 }
 
@@ -635,6 +676,39 @@ mod tests {
         assert_eq!(idle.previous, PetState::Interacting);
         assert_eq!(idle.next, PetState::Idle);
         assert_eq!(idle.animation, Some(PetAnimationIntent::Idle));
+    }
+
+    #[test]
+    fn drag_priority_suppresses_brain_until_explicit_drag_end() {
+        let mut machine = BehaviorStateMachine::default();
+        let dragged = machine.apply(PetIntent::BeginDrag, &TransitionContext::DRAG);
+        assert_eq!(dragged.previous, PetState::Idle);
+        assert_eq!(dragged.next, PetState::Dragged);
+        assert_eq!(dragged.animation, Some(PetAnimationIntent::Idle));
+        assert_eq!(
+            machine
+                .apply(PetIntent::StayIdle, &TransitionContext::BRAIN)
+                .outcome,
+            TransitionOutcome::Rejected(TransitionRejection::SuppressedByPriority)
+        );
+        let released = machine.apply(PetIntent::EndDrag, &TransitionContext::DRAG);
+        assert_eq!(released.previous, PetState::Dragged);
+        assert_eq!(released.next, PetState::Idle);
+    }
+
+    #[test]
+    fn movement_drag_position_and_release_velocity_are_explicit() {
+        let mut movement = MovementController::new(DesktopPosition::new(-100.0, 50.0));
+        movement.start_walking(HorizontalDirection::Right);
+        movement.begin_drag();
+        movement.confirm_drag_position(DesktopPosition::new(400.0, -20.0));
+        assert_eq!(movement.position(), DesktopPosition::new(400.0, -20.0));
+        assert_eq!(movement.body().velocity_logical_px_per_s, [0.0, 0.0]);
+        assert!(!movement.body().grounded);
+
+        movement.finish_drag([320.0, -180.0]);
+        assert_eq!(movement.body().velocity_logical_px_per_s, [320.0, -180.0]);
+        assert_eq!(movement.body().position, DesktopPosition::new(400.0, -20.0));
     }
 
     #[test]

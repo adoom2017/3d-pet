@@ -1,10 +1,16 @@
-//! Pointer hit testing in window-local logical coordinates.
+//! Pointer hit testing and drag gestures in explicit desktop coordinates.
+
+use std::{collections::VecDeque, time::Duration};
 
 use glam::{Mat4, Vec3, Vec4};
 
-use crate::render::PetProjection;
+use crate::{display::DesktopPosition, render::PetProjection};
 
 pub(crate) const DEFAULT_HIT_PADDING_LOGICAL: f64 = 6.0;
+const DRAG_THRESHOLD_LOGICAL: f64 = 5.0;
+const RELEASE_SAMPLE_WINDOW: Duration = Duration::from_millis(120);
+const MAX_RELEASE_SAMPLES: usize = 8;
+const MAX_RELEASE_SPEED_LOGICAL_PX_PER_S: f64 = 3_000.0;
 
 pub(crate) trait HitRegion {
     fn contains(&self, window_logical_position: [f64; 2]) -> bool;
@@ -130,16 +136,46 @@ pub(crate) struct HitUpdate {
     pub changed: bool,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum InteractionAction {
     None,
     ClickPet,
+    BeginDrag {
+        offset: [f64; 2],
+        desktop_position: DesktopPosition,
+    },
+    MoveDrag {
+        desktop_position: DesktopPosition,
+    },
+    EndDrag {
+        release_velocity: [f64; 2],
+    },
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+enum PointerState {
+    #[default]
+    Hovering,
+    Pressed {
+        start: DesktopPosition,
+        offset: [f64; 2],
+    },
+    Dragged {
+        offset: [f64; 2],
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct DragSample {
+    desktop_position: DesktopPosition,
+    timestamp: Duration,
 }
 
 #[derive(Debug, Default)]
 pub(crate) struct InteractionController {
     current_hit: bool,
-    pressed_on_pet: bool,
+    pointer_state: PointerState,
+    drag_samples: VecDeque<DragSample>,
 }
 
 impl InteractionController {
@@ -161,27 +197,172 @@ impl InteractionController {
         self.current_hit
     }
 
-    pub fn set_left_pressed(&mut self, pressed: bool) -> InteractionAction {
-        if pressed {
-            self.pressed_on_pet = self.current_hit;
+    pub fn pointer_down(
+        &mut self,
+        desktop_position: Option<DesktopPosition>,
+        window_origin: DesktopPosition,
+        timestamp: Duration,
+    ) -> InteractionAction {
+        let Some(desktop_position) = desktop_position.filter(|position| position.is_finite())
+        else {
+            return InteractionAction::None;
+        };
+        if !matches!(self.pointer_state, PointerState::Hovering)
+            || !self.current_hit
+            || !window_origin.is_finite()
+        {
             return InteractionAction::None;
         }
-        let clicked = self.pressed_on_pet && self.current_hit;
-        self.pressed_on_pet = false;
-        if clicked {
-            InteractionAction::ClickPet
+        let offset = [
+            desktop_position.x - window_origin.x,
+            desktop_position.y - window_origin.y,
+        ];
+        self.pointer_state = PointerState::Pressed {
+            start: desktop_position,
+            offset,
+        };
+        self.drag_samples.clear();
+        self.record_drag_sample(desktop_position, timestamp);
+        InteractionAction::None
+    }
+
+    pub fn pointer_moved(
+        &mut self,
+        desktop_position: Option<DesktopPosition>,
+        timestamp: Duration,
+    ) -> InteractionAction {
+        let Some(desktop_position) = desktop_position.filter(|position| position.is_finite())
+        else {
+            return InteractionAction::None;
+        };
+        match self.pointer_state {
+            PointerState::Hovering => InteractionAction::None,
+            PointerState::Pressed { start, offset } => {
+                let distance_squared =
+                    (desktop_position.x - start.x).powi(2) + (desktop_position.y - start.y).powi(2);
+                if distance_squared < DRAG_THRESHOLD_LOGICAL.powi(2) {
+                    return InteractionAction::None;
+                }
+                self.pointer_state = PointerState::Dragged { offset };
+                self.record_drag_sample(desktop_position, timestamp);
+                InteractionAction::BeginDrag {
+                    offset,
+                    desktop_position: drag_window_position(desktop_position, offset),
+                }
+            }
+            PointerState::Dragged { offset } => {
+                self.record_drag_sample(desktop_position, timestamp);
+                InteractionAction::MoveDrag {
+                    desktop_position: drag_window_position(desktop_position, offset),
+                }
+            }
+        }
+    }
+
+    pub fn pointer_up(
+        &mut self,
+        desktop_position: Option<DesktopPosition>,
+        timestamp: Duration,
+    ) -> InteractionAction {
+        let previous = std::mem::take(&mut self.pointer_state);
+        match previous {
+            PointerState::Hovering => InteractionAction::None,
+            PointerState::Pressed { .. } => {
+                self.drag_samples.clear();
+                if self.current_hit && desktop_position.is_some_and(DesktopPosition::is_finite) {
+                    InteractionAction::ClickPet
+                } else {
+                    InteractionAction::None
+                }
+            }
+            PointerState::Dragged { .. } => {
+                if let Some(position) = desktop_position.filter(|position| position.is_finite()) {
+                    self.record_drag_sample(position, timestamp);
+                }
+                let release_velocity = self.release_velocity();
+                self.drag_samples.clear();
+                InteractionAction::EndDrag { release_velocity }
+            }
+        }
+    }
+
+    pub fn cancel_pointer(&mut self) -> InteractionAction {
+        let was_dragged = matches!(self.pointer_state, PointerState::Dragged { .. });
+        self.pointer_state = PointerState::Hovering;
+        self.drag_samples.clear();
+        if was_dragged {
+            InteractionAction::EndDrag {
+                release_velocity: [0.0, 0.0],
+            }
         } else {
             InteractionAction::None
         }
     }
 
-    pub fn cancel_pointer(&mut self) {
-        self.pressed_on_pet = false;
+    pub fn click_through_required(&self) -> bool {
+        !self.current_hit && matches!(self.pointer_state, PointerState::Hovering)
     }
 
-    pub fn click_through_required(&self) -> bool {
-        !self.current_hit && !self.pressed_on_pet
+    #[cfg(test)]
+    fn is_dragging(&self) -> bool {
+        matches!(self.pointer_state, PointerState::Dragged { .. })
     }
+
+    fn record_drag_sample(&mut self, desktop_position: DesktopPosition, timestamp: Duration) {
+        if self
+            .drag_samples
+            .back()
+            .is_some_and(|sample| timestamp < sample.timestamp)
+        {
+            self.drag_samples.clear();
+        }
+        self.drag_samples.push_back(DragSample {
+            desktop_position,
+            timestamp,
+        });
+        while self.drag_samples.len() > MAX_RELEASE_SAMPLES {
+            self.drag_samples.pop_front();
+        }
+        while self.drag_samples.front().is_some_and(|sample| {
+            timestamp.saturating_sub(sample.timestamp) > RELEASE_SAMPLE_WINDOW
+        }) {
+            self.drag_samples.pop_front();
+        }
+    }
+
+    fn release_velocity(&self) -> [f64; 2] {
+        let Some(first) = self.drag_samples.front() else {
+            return [0.0, 0.0];
+        };
+        let Some(last) = self.drag_samples.back() else {
+            return [0.0, 0.0];
+        };
+        let seconds = last.timestamp.saturating_sub(first.timestamp).as_secs_f64();
+        if seconds <= f64::EPSILON {
+            return [0.0, 0.0];
+        }
+        clamp_velocity([
+            (last.desktop_position.x - first.desktop_position.x) / seconds,
+            (last.desktop_position.y - first.desktop_position.y) / seconds,
+        ])
+    }
+}
+
+fn drag_window_position(desktop_position: DesktopPosition, offset: [f64; 2]) -> DesktopPosition {
+    DesktopPosition::new(
+        desktop_position.x - offset[0],
+        desktop_position.y - offset[1],
+    )
+}
+
+fn clamp_velocity(mut velocity: [f64; 2]) -> [f64; 2] {
+    let magnitude = velocity[0].hypot(velocity[1]);
+    if magnitude > MAX_RELEASE_SPEED_LOGICAL_PX_PER_S {
+        let scale = MAX_RELEASE_SPEED_LOGICAL_PX_PER_S / magnitude;
+        velocity[0] *= scale;
+        velocity[1] *= scale;
+    }
+    velocity
 }
 
 fn homogeneous_point(point: Vec4) -> Option<Vec3> {
@@ -337,10 +518,20 @@ mod tests {
         let region = RectHitRegion::new([10.0, 10.0], [20.0, 20.0]).unwrap();
         let mut controller = InteractionController::default();
         controller.update_hit(Some([15.0, 15.0]), Some(&region));
-        assert_eq!(controller.set_left_pressed(true), InteractionAction::None);
+        assert_eq!(
+            controller.pointer_down(
+                Some(DesktopPosition::new(115.0, 215.0)),
+                DesktopPosition::new(100.0, 200.0),
+                Duration::ZERO,
+            ),
+            InteractionAction::None
+        );
         assert!(!controller.click_through_required());
         assert_eq!(
-            controller.set_left_pressed(false),
+            controller.pointer_up(
+                Some(DesktopPosition::new(115.0, 215.0)),
+                Duration::from_millis(50),
+            ),
             InteractionAction::ClickPet
         );
     }
@@ -350,19 +541,39 @@ mod tests {
         let region = RectHitRegion::new([10.0, 10.0], [20.0, 20.0]).unwrap();
         let mut controller = InteractionController::default();
         controller.update_hit(Some([15.0, 15.0]), Some(&region));
-        controller.set_left_pressed(true);
+        controller.pointer_down(
+            Some(DesktopPosition::new(115.0, 215.0)),
+            DesktopPosition::new(100.0, 200.0),
+            Duration::ZERO,
+        );
         controller.update_hit(Some([30.0, 30.0]), Some(&region));
         assert!(
             !controller.click_through_required(),
             "a pressed pointer keeps event delivery until release"
         );
-        assert_eq!(controller.set_left_pressed(false), InteractionAction::None);
+        assert_eq!(
+            controller.pointer_up(
+                Some(DesktopPosition::new(130.0, 230.0)),
+                Duration::from_millis(20),
+            ),
+            InteractionAction::None
+        );
         assert!(controller.click_through_required());
 
         controller.update_hit(Some([15.0, 15.0]), Some(&region));
-        controller.set_left_pressed(true);
-        controller.cancel_pointer();
-        assert_eq!(controller.set_left_pressed(false), InteractionAction::None);
+        controller.pointer_down(
+            Some(DesktopPosition::new(115.0, 215.0)),
+            DesktopPosition::new(100.0, 200.0),
+            Duration::ZERO,
+        );
+        assert_eq!(controller.cancel_pointer(), InteractionAction::None);
+        assert_eq!(
+            controller.pointer_up(
+                Some(DesktopPosition::new(115.0, 215.0)),
+                Duration::from_millis(20),
+            ),
+            InteractionAction::None
+        );
     }
 
     #[test]
@@ -374,5 +585,159 @@ mod tests {
             controller.click_through_required()
         });
         assert_eq!(policies, [true, false, true, false]);
+    }
+
+    #[test]
+    fn drag_threshold_preserves_press_offset_and_uses_absolute_position() {
+        let region = RectHitRegion::new([0.0, 0.0], [320.0, 320.0]).unwrap();
+        let mut controller = InteractionController::default();
+        controller.update_hit(Some([15.0, 15.0]), Some(&region));
+        controller.pointer_down(
+            Some(DesktopPosition::new(115.0, 215.0)),
+            DesktopPosition::new(100.0, 200.0),
+            Duration::ZERO,
+        );
+
+        assert_eq!(
+            controller.pointer_moved(
+                Some(DesktopPosition::new(117.0, 218.0)),
+                Duration::from_millis(10),
+            ),
+            InteractionAction::None
+        );
+        assert_eq!(
+            controller.pointer_moved(
+                Some(DesktopPosition::new(118.0, 219.0)),
+                Duration::from_millis(20),
+            ),
+            InteractionAction::BeginDrag {
+                offset: [15.0, 15.0],
+                desktop_position: DesktopPosition::new(103.0, 204.0),
+            }
+        );
+        assert!(controller.is_dragging());
+        assert_eq!(
+            controller.pointer_moved(
+                Some(DesktopPosition::new(300.0, -40.0)),
+                Duration::from_millis(40),
+            ),
+            InteractionAction::MoveDrag {
+                desktop_position: DesktopPosition::new(285.0, -55.0),
+            }
+        );
+    }
+
+    #[test]
+    fn release_velocity_uses_recent_bounded_samples() {
+        let region = RectHitRegion::new([0.0, 0.0], [320.0, 320.0]).unwrap();
+        let mut controller = InteractionController::default();
+        controller.update_hit(Some([15.0, 15.0]), Some(&region));
+        controller.pointer_down(
+            Some(DesktopPosition::new(100.0, 100.0)),
+            DesktopPosition::new(85.0, 85.0),
+            Duration::ZERO,
+        );
+        controller.pointer_moved(
+            Some(DesktopPosition::new(110.0, 110.0)),
+            Duration::from_millis(20),
+        );
+        controller.pointer_moved(
+            Some(DesktopPosition::new(130.0, 140.0)),
+            Duration::from_millis(60),
+        );
+        assert_eq!(
+            controller.pointer_up(
+                Some(DesktopPosition::new(140.0, 150.0)),
+                Duration::from_millis(100),
+            ),
+            InteractionAction::EndDrag {
+                release_velocity: [400.0, 500.0],
+            }
+        );
+        assert!(!controller.is_dragging());
+    }
+
+    #[test]
+    fn drag_cancel_releases_capture_without_velocity() {
+        let region = RectHitRegion::new([0.0, 0.0], [320.0, 320.0]).unwrap();
+        let mut controller = InteractionController::default();
+        controller.update_hit(Some([20.0, 20.0]), Some(&region));
+        controller.pointer_down(
+            Some(DesktopPosition::new(-480.0, 220.0)),
+            DesktopPosition::new(-500.0, 200.0),
+            Duration::ZERO,
+        );
+        controller.pointer_moved(
+            Some(DesktopPosition::new(-450.0, 250.0)),
+            Duration::from_millis(16),
+        );
+        assert_eq!(
+            controller.cancel_pointer(),
+            InteractionAction::EndDrag {
+                release_velocity: [0.0, 0.0],
+            }
+        );
+        assert!(!controller.is_dragging());
+    }
+
+    #[test]
+    fn release_speed_is_clamped_and_non_monotonic_time_recovers() {
+        let region = RectHitRegion::new([0.0, 0.0], [320.0, 320.0]).unwrap();
+        let mut controller = InteractionController::default();
+        controller.update_hit(Some([10.0, 10.0]), Some(&region));
+        controller.pointer_down(
+            Some(DesktopPosition::new(10.0, 10.0)),
+            DesktopPosition::default(),
+            Duration::from_millis(20),
+        );
+        controller.pointer_moved(
+            Some(DesktopPosition::new(20.0, 10.0)),
+            Duration::from_millis(10),
+        );
+        let action = controller.pointer_up(
+            Some(DesktopPosition::new(1_020.0, 10.0)),
+            Duration::from_millis(11),
+        );
+        let InteractionAction::EndDrag { release_velocity } = action else {
+            panic!("drag release must emit velocity");
+        };
+        assert!((release_velocity[0] - MAX_RELEASE_SPEED_LOGICAL_PX_PER_S).abs() < 1e-9);
+        assert_eq!(release_velocity[1], 0.0);
+    }
+
+    #[test]
+    fn release_samples_are_bounded_and_expire() {
+        let mut controller = InteractionController::default();
+        for index in 0..20_u64 {
+            controller.record_drag_sample(
+                DesktopPosition::new(index as f64, 0.0),
+                Duration::from_millis(index * 10),
+            );
+        }
+        assert_eq!(controller.drag_samples.len(), MAX_RELEASE_SAMPLES);
+        assert_eq!(
+            controller.drag_samples.front().unwrap().desktop_position,
+            DesktopPosition::new(12.0, 0.0)
+        );
+
+        controller.record_drag_sample(DesktopPosition::new(30.0, 0.0), Duration::from_millis(400));
+        assert_eq!(controller.drag_samples.len(), 1);
+        assert_eq!(controller.release_velocity(), [0.0, 0.0]);
+    }
+
+    #[test]
+    fn missing_release_position_never_synthesizes_a_click() {
+        let region = RectHitRegion::new([0.0, 0.0], [320.0, 320.0]).unwrap();
+        let mut controller = InteractionController::default();
+        controller.update_hit(Some([20.0, 20.0]), Some(&region));
+        controller.pointer_down(
+            Some(DesktopPosition::new(120.0, 220.0)),
+            DesktopPosition::new(100.0, 200.0),
+            Duration::ZERO,
+        );
+        assert_eq!(
+            controller.pointer_up(None, Duration::from_millis(20)),
+            InteractionAction::None
+        );
     }
 }

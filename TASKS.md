@@ -437,7 +437,7 @@ evidence/
 
 ## 14. Phase 11：拖动
 
-**状态：`Ready`**
+**状态：`In Progress`**
 
 **目标：** 实现命中后按下、记录 offset、移动、释放和高优先级 `Dragged` 状态。
 

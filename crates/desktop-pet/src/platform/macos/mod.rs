@@ -91,6 +91,14 @@ impl PlatformBackend for NativePlatformBackend {
                 )
             })?;
             native_window.setIgnoresMouseEvents(requested);
+            // SAFETY: the retained NSWindow is live on the AppKit main thread. Reading the
+            // property immediately verifies that the window server accepted the requested state.
+            let applied = unsafe { native_window.ignoresMouseEvents() };
+            if applied != requested {
+                return Err(PlatformError::ConfigureMouseHandling(format!(
+                    "NSWindow reported ignoresMouseEvents={applied} after requesting {requested}"
+                )));
+            }
             Ok::<_, PlatformError>(())
         })?;
         Ok(())
@@ -177,5 +185,7 @@ impl PlatformBackend for NativePlatformBackend {
 }
 
 pub(super) fn configure_window_attributes(attributes: WindowAttributes) -> WindowAttributes {
-    attributes.with_has_shadow(false)
+    attributes
+        .with_has_shadow(false)
+        .with_accepts_first_mouse(true)
 }

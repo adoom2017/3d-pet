@@ -121,6 +121,7 @@ pub struct Application {
     state_machine: Option<BehaviorStateMachine>,
     simulation_clock: SimulationClock,
     monitor_refresh_elapsed: Duration,
+    interaction_epoch: Option<Instant>,
     last_logic_update: Option<Instant>,
     fixed_steps: FixedStepAccumulator,
     redraw_pending: bool,
@@ -149,6 +150,7 @@ impl Application {
             state_machine: None,
             simulation_clock: SimulationClock::default(),
             monitor_refresh_elapsed: Duration::ZERO,
+            interaction_epoch: None,
             last_logic_update: None,
             fixed_steps: FixedStepAccumulator::default(),
             redraw_pending: false,
@@ -250,7 +252,9 @@ impl Application {
         self.simulation_clock = SimulationClock::default();
         self.monitor_refresh_elapsed = Duration::ZERO;
         self.fixed_steps = FixedStepAccumulator::default();
-        self.last_logic_update = Some(Instant::now());
+        let now = Instant::now();
+        self.interaction_epoch = Some(now);
+        self.last_logic_update = Some(now);
         self.redraw_pending = true;
         self.redraw_request_logged = false;
         self.refresh_pointer_from_platform()?;
@@ -398,12 +402,23 @@ impl Application {
         } else {
             self.mouse_state.clear_cursor();
         }
+        let action = self.interaction.pointer_moved(
+            self.mouse_state.desktop_position,
+            self.interaction_timestamp(),
+        );
+        self.apply_interaction_action(action)?;
         self.update_pointer_hit();
         self.sync_click_through()
     }
 
+    fn interaction_timestamp(&self) -> Duration {
+        self.interaction_epoch
+            .map(|epoch| Instant::now().saturating_duration_since(epoch))
+            .unwrap_or_else(|| self.simulation_clock.now())
+    }
+
     fn restore_mouse_handling(&mut self) {
-        self.interaction.cancel_pointer();
+        let _ = self.interaction.cancel_pointer();
         self.mouse_state.set_left_pressed(false);
         if let Some(platform_backend) = self.platform_backend.as_mut()
             && let Err(error) = platform_backend.set_click_through(false)
@@ -413,11 +428,67 @@ impl Application {
         self.click_through_active = Some(false);
     }
 
-    fn apply_interaction_action(&mut self, action: InteractionAction) {
-        if action == InteractionAction::ClickPet {
-            tracing::info!("complete pet click submitted as interaction intent");
-            self.apply_pet_intent(PetIntent::Interact, TransitionContext::EXPLICIT);
+    fn apply_interaction_action(&mut self, action: InteractionAction) -> Result<(), AppError> {
+        match action {
+            InteractionAction::None => {}
+            InteractionAction::ClickPet => {
+                tracing::info!("complete pet click submitted as interaction intent");
+                self.apply_pet_intent(PetIntent::Interact, TransitionContext::EXPLICIT);
+            }
+            InteractionAction::BeginDrag {
+                offset,
+                desktop_position,
+            } => {
+                tracing::info!(?offset, ?desktop_position, "pet drag started");
+                self.apply_pet_intent(PetIntent::BeginDrag, TransitionContext::DRAG);
+                if let Some(movement) = self.movement.as_mut() {
+                    movement.begin_drag();
+                }
+                self.move_drag_window(desktop_position)?;
+            }
+            InteractionAction::MoveDrag { desktop_position } => {
+                self.move_drag_window(desktop_position)?;
+            }
+            InteractionAction::EndDrag { release_velocity } => {
+                tracing::info!(?release_velocity, "pet drag ended");
+                self.apply_pet_intent(PetIntent::EndDrag, TransitionContext::DRAG);
+                if let Some(movement) = self.movement.as_mut() {
+                    movement.finish_drag(release_velocity);
+                }
+            }
         }
+        Ok(())
+    }
+
+    fn move_drag_window(
+        &mut self,
+        requested: crate::display::DesktopPosition,
+    ) -> Result<(), AppError> {
+        let confirmed = self
+            .display_manager
+            .as_ref()
+            .ok_or_else(|| AppError::Platform("display manager is unavailable".to_owned()))?
+            .constrain_position(
+                requested,
+                DesktopLogicalSize::new(PET_WINDOW_LOGICAL_SIZE, PET_WINDOW_LOGICAL_SIZE),
+            );
+        self.platform_backend
+            .as_mut()
+            .ok_or_else(|| AppError::Platform("platform backend is unavailable".to_owned()))?
+            .set_window_position(confirmed)
+            .map_err(|error| {
+                AppError::Platform(format!(
+                    "failed to drag the window to logical position ({:.3}, {:.3}): {error}",
+                    confirmed.x, confirmed.y
+                ))
+            })?;
+        if let Some(movement) = self.movement.as_mut() {
+            movement.confirm_drag_position(confirmed);
+        }
+        self.mouse_state.update_window_origin(confirmed);
+        self.update_pointer_hit();
+        tracing::debug!(?requested, ?confirmed, "pet drag position applied");
+        Ok(())
     }
 
     fn apply_movement_command(&mut self, key: KeyCode) {
@@ -492,6 +563,7 @@ impl Application {
                 (PetState::Turning, Some(HorizontalDirection::Right)) => {
                     "DesktopPet [Turning Right]"
                 }
+                (PetState::Dragged, _) => "DesktopPet [Dragged]",
                 _ => "DesktopPet [Idle]",
             };
             window.set_title(title);
@@ -649,6 +721,7 @@ impl ApplicationHandler for Application {
                 self.brain = None;
                 self.state_machine = None;
                 self.platform_backend = None;
+                self.interaction_epoch = None;
                 self.last_logic_update = None;
                 self.window = None;
             }
@@ -727,20 +800,52 @@ impl ApplicationHandler for Application {
                 ..
             } => {
                 let pressed = state == ElementState::Pressed;
+                if let Err(error) = self.refresh_pointer_from_platform() {
+                    self.fail_and_exit(event_loop, error);
+                    return;
+                }
+                tracing::info!(
+                    pressed,
+                    desktop = ?self.mouse_state.desktop_position,
+                    window_logical = ?self.mouse_state.window_logical_position,
+                    "pet pointer button changed"
+                );
                 self.mouse_state.set_left_pressed(pressed);
-                let action = self.interaction.set_left_pressed(pressed);
-                self.apply_interaction_action(action);
+                let timestamp = self.interaction_timestamp();
+                let action = if pressed {
+                    let window_origin = self
+                        .movement
+                        .as_ref()
+                        .map(MovementController::position)
+                        .unwrap_or_default();
+                    self.interaction.pointer_down(
+                        self.mouse_state.desktop_position,
+                        window_origin,
+                        timestamp,
+                    )
+                } else {
+                    self.interaction
+                        .pointer_up(self.mouse_state.desktop_position, timestamp)
+                };
+                if let Err(error) = self.apply_interaction_action(action) {
+                    self.fail_and_exit(event_loop, error);
+                    return;
+                }
                 if let Err(error) = self.sync_click_through() {
                     self.fail_and_exit(event_loop, error);
                 }
             }
             WindowEvent::Focused(false) => {
-                tracing::debug!(
+                tracing::info!(
                     ?window_id,
                     "window focus lost; cancelling pointer interaction"
                 );
-                self.interaction.cancel_pointer();
+                let action = self.interaction.cancel_pointer();
                 self.mouse_state.set_left_pressed(false);
+                if let Err(error) = self.apply_interaction_action(action) {
+                    self.fail_and_exit(event_loop, error);
+                    return;
+                }
                 if let Err(error) = self.refresh_pointer_from_platform() {
                     self.fail_and_exit(event_loop, error);
                 }
