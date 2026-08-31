@@ -4,6 +4,15 @@ use thiserror::Error;
 pub enum AppError {
     #[error("application configuration is invalid")]
     Config(#[from] ConfigError),
+
+    #[error("event loop failed: {0}")]
+    EventLoop(#[from] winit::error::EventLoopError),
+
+    #[error("window creation failed: {0}")]
+    WindowCreation(#[from] winit::error::OsError),
+
+    #[error("platform window operation failed: {0}")]
+    Platform(String),
 }
 
 #[derive(Debug, Error)]

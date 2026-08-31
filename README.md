@@ -1,6 +1,6 @@
 # DesktopPet
 
-DesktopPet is a lightweight 3D desktop pet for Windows and macOS. Phase 0 is complete and Phase 1 is ready to implement the transparent, borderless, always-on-top application window.
+DesktopPet is a lightweight 3D desktop pet for Windows and macOS. Phase 0 is complete and Phase 1 is verifying the transparent, borderless, always-on-top application window. Phase 2 remains blocked until the required Windows real-machine acceptance passes.
 
 ## Prerequisites
 
@@ -17,7 +17,7 @@ cargo build --workspace
 cargo run -p desktop-pet
 ```
 
-Phase 0 intentionally logs startup and exits cleanly. A persistent window is introduced only after Phase 0 passes its gates.
+The application opens a persistent 320 x 320 transparent window. Close the window normally or press Escape to exit through the clean shutdown path.
 
 ## Verification
 

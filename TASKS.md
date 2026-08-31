@@ -19,7 +19,7 @@
 | Phase | 名称 | 状态 |
 | --- | --- | --- |
 | 0 | 工程基线 | Done |
-| 1 | 透明窗口 | Ready |
+| 1 | 透明窗口 | Verifying |
 | 2 | wgpu 基线 | Blocked |
 | 3 | 静态 GLB | Blocked |
 | 4 | 骨骼与 Idle | Blocked |
@@ -114,7 +114,7 @@ evidence/
 
 ## 4. Phase 1：透明窗口
 
-**状态：`Ready`**
+**状态：`Verifying`**
 
 **目标：** 创建 320 x 320 逻辑像素、无边框、透明、不可缩放、置顶的窗口，并验证系统合成与窗口层级。
 
@@ -124,11 +124,11 @@ evidence/
 
 **实现任务：**
 
-- [ ] 在主线程建立 winit event loop 和版本对应的应用生命周期。
-- [ ] 配置 320 x 320 逻辑尺寸、decorations false、transparent true、resizable false 和 always-on-top。
-- [ ] 在 `PlatformBackend` 两端实现或补强置顶能力，平台条件编译只存在于 `platform/**`。
-- [ ] 正确处理 close、resize、scale-factor 和零尺寸事件，正常关闭时有结构化日志。
-- [ ] 为窗口配置映射和非平台逻辑添加自动测试。
+- [x] 在主线程建立 winit event loop 和版本对应的应用生命周期。
+- [x] 配置 320 x 320 逻辑尺寸、decorations false、transparent true、resizable false 和 always-on-top。
+- [x] 在 `PlatformBackend` 两端实现或补强置顶能力，平台条件编译只存在于 `platform/**`。
+- [x] 正确处理 close、resize、scale-factor 和零尺寸事件，正常关闭时有结构化日志。
+- [x] 为窗口配置映射和非平台逻辑添加自动测试。
 
 **自动验证命令：** 执行四条全局门禁命令；运行窗口配置单元测试和 `cargo run -p desktop-pet` 启动 smoke。
 

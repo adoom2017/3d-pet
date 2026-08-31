@@ -22,14 +22,14 @@ pub fn run(config: AppConfig) -> Result<()> {
         .try_init()
         .map_err(|error| anyhow::anyhow!("failed to initialize structured logging: {error}"))?;
 
-    let app = Application::new(config).context("failed to construct DesktopPet")?;
+    let mut app = Application::new(config).context("failed to construct DesktopPet")?;
 
     tracing::info!(
         version = env!("CARGO_PKG_VERSION"),
         platform = std::env::consts::OS,
         "DesktopPet starting"
     );
-    app.run();
+    app.run().context("DesktopPet event loop failed")?;
     tracing::info!("DesktopPet stopped cleanly");
 
     Ok(())
