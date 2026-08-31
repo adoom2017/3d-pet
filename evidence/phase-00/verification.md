@@ -1,12 +1,12 @@
 # Phase 0 verification
 
-Status: `Verifying`
+Status: `Done`
 
 ## Environment
 
 | Date | Commit | Platform | Toolchain | Result | Evidence |
 | --- | --- | --- | --- | --- | --- |
-| 2026-08-30 | Initial Phase 0 commit; full SHA to be recorded with CI results | macOS 26.6.2 (25G83), arm64 | rustc 1.96.0, cargo 1.96.0 | Local pass | This document |
+| 2026-08-30 | `b8f31d79170319fcb7658a10939191b16b6d9a49` | macOS 26.6.2 (25G83), arm64 | rustc 1.96.0, cargo 1.96.0 | Local pass | This document |
 
 ## Local gates
 
@@ -29,8 +29,15 @@ INFO desktop_pet: DesktopPet stopped cleanly
 
 Dependency graph verification confirmed that winit 0.30.13 and wgpu 30.0.1 both resolve raw-window-handle 0.6.2.
 
-## Pending exit evidence
+## CI matrix
 
-- Record the candidate commit's full SHA when the CI results are added.
-- The GitHub Actions macOS/Windows matrix cannot run until the repository is pushed to the configured remote.
-- Phase 0 must remain `Verifying`; Phase 1 remains `Blocked` until both CI jobs pass and this record is updated.
+| Date | Commit | Platform | Result | Evidence |
+| --- | --- | --- | --- | --- |
+| 2026-08-31 | `b8f31d79170319fcb7658a10939191b16b6d9a49` | `macos-latest` | Pass | <https://github.com/adoom2017/3d-pet/actions/runs/33346169227> |
+| 2026-08-31 | `b8f31d79170319fcb7658a10939191b16b6d9a49` | `windows-latest` | Pass | <https://github.com/adoom2017/3d-pet/actions/runs/33346169227> |
+
+Both jobs passed formatting, Clippy with warnings denied, workspace tests, and workspace build. The run reported that `actions/checkout@v4` used deprecated Node.js 20; the Phase 0 completion change upgrades it to `actions/checkout@v5` before Phase 1 begins.
+
+## Exit decision
+
+All Phase 0 implementation tasks, local gates, macOS startup acceptance, and the macOS/Windows CI matrix passed. Phase 0 is `Done`; Phase 1 is `Ready`.

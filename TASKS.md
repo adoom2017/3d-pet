@@ -18,8 +18,8 @@
 
 | Phase | 名称 | 状态 |
 | --- | --- | --- |
-| 0 | 工程基线 | Verifying |
-| 1 | 透明窗口 | Blocked |
+| 0 | 工程基线 | Done |
+| 1 | 透明窗口 | Ready |
 | 2 | wgpu 基线 | Blocked |
 | 3 | 静态 GLB | Blocked |
 | 4 | 骨骼与 Idle | Blocked |
@@ -78,7 +78,7 @@ evidence/
 
 ## 3. Phase 0：工程基线
 
-**状态：`Verifying`**
+**状态：`Done`**
 
 **目标：** 建立可在 macOS 开发、在 macOS / Windows CI 编译测试的单应用 Cargo workspace，具备入口、错误、日志、测试和依赖兼容性基线。
 
@@ -114,7 +114,7 @@ evidence/
 
 ## 4. Phase 1：透明窗口
 
-**状态：`Blocked`**
+**状态：`Ready`**
 
 **目标：** 创建 320 x 320 逻辑像素、无边框、透明、不可缩放、置顶的窗口，并验证系统合成与窗口层级。
 

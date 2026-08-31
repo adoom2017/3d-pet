@@ -1,6 +1,6 @@
 # DesktopPet
 
-DesktopPet is a lightweight 3D desktop pet for Windows and macOS. Phase 0 is in verification: the local Rust engineering baseline passes its gates, while dual-platform CI evidence is still pending. Windowing, rendering, and pet behavior work remain blocked.
+DesktopPet is a lightweight 3D desktop pet for Windows and macOS. Phase 0 is complete and Phase 1 is ready to implement the transparent, borderless, always-on-top application window.
 
 ## Prerequisites
 
