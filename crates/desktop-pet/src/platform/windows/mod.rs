@@ -2,13 +2,18 @@
 
 use std::sync::Arc;
 
+use windows_sys::Win32::{
+    Graphics::Gdi::{GetMonitorInfoW, MONITORINFO},
+    UI::WindowsAndMessaging::MONITORINFOF_PRIMARY,
+};
 use winit::{
     dpi::LogicalPosition,
+    platform::windows::MonitorHandleExtWindows,
     window::{Window, WindowAttributes, WindowLevel},
 };
 
 use super::{PlatformBackend, PlatformError};
-use crate::display::DesktopPosition;
+use crate::display::{DesktopPosition, MonitorId, MonitorInfo};
 
 pub(super) struct NativePlatformBackend {
     window: Arc<Window>,
@@ -58,6 +63,47 @@ impl PlatformBackend for NativePlatformBackend {
         self.window
             .set_outer_position(LogicalPosition::new(rounded.x, rounded.y));
         Ok(())
+    }
+
+    fn monitors(&self) -> Result<Vec<MonitorInfo>, PlatformError> {
+        self.window
+            .available_monitors()
+            .map(|monitor| {
+                let mut native = MONITORINFO {
+                    cbSize: size_of::<MONITORINFO>() as u32,
+                    rcMonitor: Default::default(),
+                    rcWork: Default::default(),
+                    dwFlags: 0,
+                };
+                // SAFETY: hmonitor is supplied by winit and native points to a correctly
+                // initialized MONITORINFO whose lifetime covers this call.
+                let succeeded = unsafe {
+                    GetMonitorInfoW(monitor.hmonitor() as *mut std::ffi::c_void, &mut native)
+                };
+                if succeeded == 0 {
+                    return Err(PlatformError::EnumerateMonitors(
+                        std::io::Error::last_os_error().to_string(),
+                    ));
+                }
+                let scale = monitor.scale_factor();
+                let work = native.rcWork;
+                MonitorInfo::from_physical_work_area(
+                    MonitorId(monitor.hmonitor() as usize as u64),
+                    work.left,
+                    work.top,
+                    work.right,
+                    work.bottom,
+                    scale,
+                    native.dwFlags & MONITORINFOF_PRIMARY != 0,
+                )
+                .ok_or_else(|| {
+                    PlatformError::EnumerateMonitors(format!(
+                        "monitor {:?} returned invalid work-area metrics",
+                        monitor.native_id()
+                    ))
+                })
+            })
+            .collect()
     }
 }
 

@@ -26,7 +26,7 @@
 | 5 | Idle / Walk Cross Fade | Done |
 | 6 | 桌面移动 | Done |
 | 7 | PetBrain | Done |
-| 8 | 边界与显示器 | Ready |
+| 8 | 边界与显示器 | Verifying |
 | 9 | 命中测试 | Blocked |
 | 10 | 平台鼠标穿透 | Blocked |
 | 11 | 拖动 | Blocked |
@@ -339,7 +339,7 @@ evidence/
 
 ## 11. Phase 8：边界与显示器
 
-**状态：`Ready`**
+**状态：`Verifying`**
 
 **目标：** 支持显示器工作区、负坐标、不同 DPI、窗口跨屏、边缘夹紧和转身。
 
@@ -349,12 +349,12 @@ evidence/
 
 **实现任务：**
 
-- [ ] 实现 `MonitorInfo` 快照和 `DisplayManager`，统一桌面左上角逻辑坐标。
-- [ ] 使用工作区而非完整屏幕尺寸计算左右边缘和地面。
-- [ ] 实现窗口中心优先、最大相交面积其次、primary 最后的活动显示器规则。
-- [ ] 支持负 desktop origin、不同 scale factor、显示器热插拔和空列表降级。
-- [ ] 在越界前夹紧位置并产生 Turn，避免逐帧撞边反复翻转。
-- [ ] 覆盖单屏、左侧负坐标屏、上下排列、跨屏、125%/200% 和 Retina 等表驱动测试。
+- [x] 实现 `MonitorInfo` 快照和 `DisplayManager`，统一桌面左上角逻辑坐标。
+- [x] 使用工作区而非完整屏幕尺寸计算左右边缘和地面。
+- [x] 实现窗口中心优先、最大相交面积其次、primary 最后的活动显示器规则。
+- [x] 支持负 desktop origin、不同 scale factor、显示器热插拔和空列表降级。
+- [x] 在越界前夹紧位置并产生 Turn，避免逐帧撞边反复翻转。
+- [x] 覆盖单屏、左侧负坐标屏、上下排列、跨屏、125%/200% 和 Retina 等表驱动测试。
 
 **自动验证命令：** 执行四条全局门禁命令；运行 display conversion、monitor selection、clamp 和 boundary-turn tests。
 

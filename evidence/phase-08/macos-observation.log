@@ -1,0 +1,18 @@
+Phase 8 macOS runtime observation
+Date: 2026-08-31
+Platform: macOS 26.6.2 (25G83), arm64, Apple M5
+Build: local debug candidate based on 36c3467ff8bad374208a64db862631503d5ade7a
+
+Observed monitor work-area snapshot:
+2026-08-31T07:40:47.597489Z INFO monitor_id=1 x=0.0 y=33.0 width=1512.0 height=882.0 scale_factor=2.0 primary=true
+2026-08-31T07:40:47.597520Z INFO monitor_id=3 x=1512.0 y=-106.0 width=2560.0 height=1410.0 scale_factor=2.0 primary=false
+
+Representative boundary transition:
+2026-08-31T07:41:12.265641Z INFO pet intent evaluated intent=Walk { direction: Left }
+2026-08-31T07:41:12.599565Z INFO desktop work-area boundary requested a turn turn=Right
+2026-08-31T07:41:12.599956Z INFO state transition previous=Walking next=Turning facing=Some(Right) animation=Some(Idle)
+2026-08-31T07:41:12.865673Z INFO state transition previous=Turning next=Walking facing=Some(Right) animation=Some(Walk)
+
+Result: Pass. The transparent window remained visible inside the available work area,
+did not enter the menu-bar or Dock reservations, and resumed walking after one boundary
+Turn transition. Both NSScreen work areas were detected with their actual vertical offset.

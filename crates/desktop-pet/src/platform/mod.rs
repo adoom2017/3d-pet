@@ -5,7 +5,7 @@ use std::sync::Arc;
 use thiserror::Error;
 use winit::window::{Window, WindowAttributes};
 
-use crate::display::DesktopPosition;
+use crate::display::{DesktopPosition, MonitorInfo};
 
 #[cfg(target_os = "macos")]
 mod macos;
@@ -21,6 +21,7 @@ pub(crate) trait PlatformBackend {
     fn set_always_on_top(&mut self, enabled: bool) -> Result<(), PlatformError>;
     fn window_position(&self) -> Result<DesktopPosition, PlatformError>;
     fn set_window_position(&mut self, position: DesktopPosition) -> Result<(), PlatformError>;
+    fn monitors(&self) -> Result<Vec<MonitorInfo>, PlatformError>;
 }
 
 #[derive(Debug, Error)]
@@ -29,6 +30,8 @@ pub(crate) enum PlatformError {
     ReadWindowPosition(#[source] winit::error::NotSupportedError),
     #[error("window position must contain finite logical coordinates, got ({x}, {y})")]
     InvalidWindowPosition { x: f64, y: f64 },
+    #[error("failed to enumerate monitor work areas: {0}")]
+    EnumerateMonitors(String),
 }
 
 pub(crate) fn configure_window_attributes(attributes: WindowAttributes) -> WindowAttributes {

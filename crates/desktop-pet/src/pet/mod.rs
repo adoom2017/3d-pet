@@ -489,18 +489,19 @@ impl MovementController {
         self.body.position = position;
     }
 
-    pub fn try_advance<E>(
+    pub fn try_advance<E, T>(
         &mut self,
         delta: Duration,
-        mut set_platform_position: impl FnMut(DesktopPosition) -> Result<(), E>,
-    ) -> Result<bool, E> {
+        mut apply: impl FnMut(DesktopPosition, DesktopPosition) -> Result<(DesktopPosition, T), E>,
+    ) -> Result<Option<T>, E> {
         if !matches!(self.state, MovementState::Walking(_)) {
-            return Ok(false);
+            return Ok(None);
         }
-        let next = self.proposed_position(delta);
-        set_platform_position(next)?;
-        self.confirm_position(next);
-        Ok(true)
+        let current = self.body.position;
+        let proposed = self.proposed_position(delta);
+        let (confirmed, output) = apply(current, proposed)?;
+        self.confirm_position(confirmed);
+        Ok(Some(output))
     }
 
     #[cfg(test)]
@@ -772,7 +773,9 @@ mod tests {
         let mut movement = MovementController::new(DesktopPosition::new(5.0, 7.0));
         movement.start_walking(HorizontalDirection::Right);
         let error = movement
-            .try_advance(Duration::from_secs(1), |_position| Err("mock failure"))
+            .try_advance(Duration::from_secs(1), |_current, _proposed| {
+                Err::<(DesktopPosition, ()), _>("mock failure")
+            })
             .expect_err("mock platform must reject the move");
         assert_eq!(error, "mock failure");
         assert_eq!(movement.position(), DesktopPosition::new(5.0, 7.0));
@@ -784,14 +787,31 @@ mod tests {
         movement.start_walking(HorizontalDirection::Right);
         let mut received = None;
         assert_eq!(
-            movement.try_advance(Duration::from_secs(1), |position| {
-                received = Some(position);
-                Ok::<_, ()>(())
+            movement.try_advance(Duration::from_secs(1), |current, proposed| {
+                assert_eq!(current, DesktopPosition::new(5.0, 7.0));
+                received = Some(proposed);
+                Ok::<_, ()>((proposed, "moved"))
             }),
-            Ok(true)
+            Ok(Some("moved"))
         );
         assert_eq!(received, Some(DesktopPosition::new(85.0, 7.0)));
         assert_eq!(movement.position(), DesktopPosition::new(85.0, 7.0));
+    }
+
+    #[test]
+    fn successful_platform_move_commits_a_constrained_position() {
+        let mut movement = MovementController::new(DesktopPosition::new(5.0, 7.0));
+        movement.start_walking(HorizontalDirection::Right);
+
+        let result = movement
+            .try_advance(Duration::from_secs(1), |_current, proposed| {
+                assert_eq!(proposed, DesktopPosition::new(85.0, 7.0));
+                Ok::<_, ()>((DesktopPosition::new(60.0, 7.0), true))
+            })
+            .expect("mock platform move");
+
+        assert_eq!(result, Some(true));
+        assert_eq!(movement.position(), DesktopPosition::new(60.0, 7.0));
     }
 
     #[test]

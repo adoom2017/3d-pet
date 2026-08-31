@@ -1,4 +1,7 @@
-use std::{sync::Arc, time::Instant};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use winit::{
     application::ApplicationHandler,
@@ -13,6 +16,7 @@ use crate::{
     animation::{AnimationController, AnimationRequest},
     asset::{AssetManager, default_asset_root, default_manifest_path},
     config::AppConfig,
+    display::{DisplayManager, LogicalSize as DesktopLogicalSize},
     error::AppError,
     pet::{
         BehaviorStateMachine, BrainConfig, HorizontalDirection, MonotonicClock, MovementController,
@@ -27,6 +31,26 @@ use crate::{
 
 pub const PET_WINDOW_LOGICAL_SIZE: f64 = 320.0;
 const DEFAULT_BRAIN_SEED: u64 = 0x3d50_6574_2026_0831;
+const MONITOR_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
+
+fn log_monitor_snapshot(display_manager: &DisplayManager) {
+    if display_manager.monitors().is_empty() {
+        tracing::warn!("platform returned no monitors; desktop boundary constraints are disabled");
+        return;
+    }
+    for monitor in display_manager.monitors() {
+        tracing::info!(
+            monitor_id = monitor.id.0,
+            x = monitor.work_area_origin.x,
+            y = monitor.work_area_origin.y,
+            width = monitor.work_area_size.width,
+            height = monitor.work_area_size.height,
+            scale_factor = monitor.scale_factor,
+            primary = monitor.is_primary,
+            "monitor work-area snapshot"
+        );
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct WindowSpec {
@@ -81,10 +105,12 @@ pub struct Application {
     _asset_manager: Option<AssetManager>,
     animation: Option<AnimationController>,
     movement: Option<MovementController>,
+    display_manager: Option<DisplayManager>,
     brain: Option<WanderingPetBrain>,
     brain_rng: SplitMix64,
     state_machine: Option<BehaviorStateMachine>,
     simulation_clock: SimulationClock,
+    monitor_refresh_elapsed: Duration,
     last_logic_update: Option<Instant>,
     fixed_steps: FixedStepAccumulator,
     redraw_pending: bool,
@@ -104,10 +130,12 @@ impl Application {
             _asset_manager: None,
             animation: None,
             movement: None,
+            display_manager: None,
             brain: None,
             brain_rng: SplitMix64::seeded(DEFAULT_BRAIN_SEED),
             state_machine: None,
             simulation_clock: SimulationClock::default(),
+            monitor_refresh_elapsed: Duration::ZERO,
             last_logic_update: None,
             fixed_steps: FixedStepAccumulator::default(),
             redraw_pending: false,
@@ -149,6 +177,16 @@ impl Application {
         let initial_position = platform_backend
             .window_position()
             .map_err(|error| AppError::Platform(error.to_string()))?;
+        let monitors = platform_backend
+            .monitors()
+            .map_err(|error| AppError::Platform(error.to_string()))?;
+        let display_manager = DisplayManager::new(monitors);
+        let window_size = DesktopLogicalSize::new(spec.logical_width, spec.logical_height);
+        let initial_position = display_manager.constrain_position(initial_position, window_size);
+        platform_backend
+            .set_window_position(initial_position)
+            .map_err(|error| AppError::Platform(error.to_string()))?;
+        log_monitor_snapshot(&display_manager);
         let mut renderer = pollster::block_on(Renderer::new(Arc::clone(&window)))?;
         let mut asset_manager = AssetManager::new(default_asset_root())?;
         let pet_handle = asset_manager.load_pet(&default_manifest_path())?;
@@ -185,6 +223,7 @@ impl Application {
         self._asset_manager = Some(asset_manager);
         self.animation = Some(animation);
         self.movement = Some(MovementController::new(initial_position));
+        self.display_manager = Some(display_manager);
         self.brain = Some(
             WanderingPetBrain::new(BrainConfig::default())
                 .map_err(|error| AppError::Behavior(error.to_string()))?,
@@ -192,6 +231,7 @@ impl Application {
         self.brain_rng = SplitMix64::seeded(DEFAULT_BRAIN_SEED);
         self.state_machine = Some(BehaviorStateMachine::default());
         self.simulation_clock = SimulationClock::default();
+        self.monitor_refresh_elapsed = Duration::ZERO;
         self.fixed_steps = FixedStepAccumulator::default();
         self.last_logic_update = Some(Instant::now());
         self.redraw_pending = true;
@@ -210,21 +250,63 @@ impl Application {
     }
 
     fn advance_movement(&mut self) -> Result<(), AppError> {
+        let direction = self.state_machine.as_ref().map(PetStateMachine::facing);
         let Some(movement) = self.movement.as_mut() else {
             return Ok(());
         };
+        let Some(direction) = direction else {
+            return Ok(());
+        };
+        let display_manager = self
+            .display_manager
+            .as_ref()
+            .ok_or_else(|| AppError::Platform("display manager is unavailable".to_owned()))?;
         let platform_backend = self
             .platform_backend
             .as_mut()
             .ok_or_else(|| AppError::Platform("platform backend is unavailable".to_owned()))?;
-        movement.try_advance(FIXED_UPDATE_INTERVAL, |next| {
-            platform_backend.set_window_position(next).map_err(|error| {
-                AppError::Platform(format!(
-                    "failed to move the window to logical position ({:.3}, {:.3}): {error}",
-                    next.x, next.y
-                ))
-            })
+        let boundary = movement.try_advance(FIXED_UPDATE_INTERVAL, |current, proposed| {
+            let boundary = display_manager.constrain_horizontal_move(
+                current,
+                proposed,
+                DesktopLogicalSize::new(PET_WINDOW_LOGICAL_SIZE, PET_WINDOW_LOGICAL_SIZE),
+                direction,
+            );
+            platform_backend
+                .set_window_position(boundary.position)
+                .map_err(|error| {
+                    AppError::Platform(format!(
+                        "failed to move the window to logical position ({:.3}, {:.3}): {error}",
+                        boundary.position.x, boundary.position.y
+                    ))
+                })?;
+            Ok::<_, AppError>((boundary.position, boundary.turn))
         })?;
+        if let Some(Some(turn)) = boundary {
+            tracing::info!(?turn, "desktop work-area boundary requested a turn");
+            self.apply_pet_intent(
+                PetIntent::Turn { direction: turn },
+                TransitionContext::BRAIN,
+            );
+        }
+        Ok(())
+    }
+
+    fn refresh_monitors(&mut self) -> Result<(), AppError> {
+        let monitors = self
+            .platform_backend
+            .as_ref()
+            .ok_or_else(|| AppError::Platform("platform backend is unavailable".to_owned()))?
+            .monitors()
+            .map_err(|error| AppError::Platform(error.to_string()))?;
+        let display_manager = self
+            .display_manager
+            .as_mut()
+            .ok_or_else(|| AppError::Platform("display manager is unavailable".to_owned()))?;
+        if display_manager.refresh(monitors) {
+            tracing::info!("monitor topology or work area changed");
+            log_monitor_snapshot(display_manager);
+        }
         Ok(())
     }
 
@@ -348,6 +430,13 @@ impl Application {
             );
         }
         for _ in 0..batch.steps {
+            self.monitor_refresh_elapsed = self
+                .monitor_refresh_elapsed
+                .saturating_add(FIXED_UPDATE_INTERVAL);
+            if self.monitor_refresh_elapsed >= MONITOR_REFRESH_INTERVAL {
+                self.monitor_refresh_elapsed = Duration::ZERO;
+                self.refresh_monitors()?;
+            }
             self.update_behavior();
             if let Some(animation) = self.animation.as_mut() {
                 animation
@@ -440,6 +529,7 @@ impl ApplicationHandler for Application {
                 self._asset_manager = None;
                 self.animation = None;
                 self.movement = None;
+                self.display_manager = None;
                 self.brain = None;
                 self.state_machine = None;
                 self.platform_backend = None;
@@ -472,6 +562,10 @@ impl ApplicationHandler for Application {
                     renderer.resize(window.inner_size());
                 }
                 self.redraw_pending = true;
+                if let Err(error) = self.refresh_monitors() {
+                    self.fail_and_exit(event_loop, error);
+                    return;
+                }
                 event_loop.set_control_flow(ControlFlow::Poll);
             }
             WindowEvent::RedrawRequested => {

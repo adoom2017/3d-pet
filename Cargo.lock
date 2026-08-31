@@ -322,6 +322,8 @@ dependencies = [
  "glam",
  "gltf",
  "image",
+ "objc2-app-kit",
+ "objc2-foundation 0.2.2",
  "pollster",
  "serde",
  "serde_json",
@@ -331,6 +333,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "wgpu",
+ "windows-sys 0.61.2",
  "winit",
 ]
 
