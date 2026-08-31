@@ -159,7 +159,7 @@ impl PlatformBackend for NativePlatformBackend {
             .primary_monitor()
             .map(|monitor| monitor.native_id());
 
-        Ok(self
+        let monitors: Vec<_> = self
             .window
             .available_monitors()
             .filter_map(|monitor| {
@@ -178,6 +178,31 @@ impl PlatformBackend for NativePlatformBackend {
                     LogicalSize::new(visible.size.width, visible.size.height),
                     monitor.scale_factor(),
                     primary_id == Some(monitor.native_id()),
+                )
+            })
+            .collect();
+        if !monitors.is_empty() {
+            return Ok(monitors);
+        }
+
+        tracing::warn!(
+            screen_count = screens.len(),
+            "winit returned no monitors; using the AppKit screen snapshot"
+        );
+        Ok((0..screens.len())
+            .filter_map(|index| {
+                let screen = screens.get(index)?;
+                let visible = screen.visibleFrame();
+                let origin = DesktopPosition::new(
+                    visible.origin.x,
+                    primary_top - visible.origin.y - visible.size.height,
+                );
+                MonitorInfo::new(
+                    MonitorId((1_u64 << 63) | index as u64),
+                    origin,
+                    LogicalSize::new(visible.size.width, visible.size.height),
+                    screen.backingScaleFactor(),
+                    index == 0,
                 )
             })
             .collect())
