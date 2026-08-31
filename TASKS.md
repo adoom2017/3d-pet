@@ -22,7 +22,7 @@
 | 1 | 透明窗口 | Done |
 | 2 | wgpu 基线 | Done |
 | 3 | 静态 GLB | Done |
-| 4 | 骨骼与 Idle | In Progress |
+| 4 | 骨骼与 Idle | Verifying |
 | 5 | Idle / Walk Cross Fade | Blocked |
 | 6 | 桌面移动 | Blocked |
 | 7 | PetBrain | Blocked |
@@ -211,7 +211,7 @@ evidence/
 
 ## 7. Phase 4：骨骼与 Idle
 
-**状态：`In Progress`**
+**状态：`Verifying`**
 
 **目标：** 实现 skin、joint matrix、动画 channel 采样并稳定循环 Idle。
 
@@ -221,11 +221,11 @@ evidence/
 
 **实现任务：**
 
-- [ ] 加载 skeleton hierarchy、joint、inverse bind matrix 和 bind pose，校验索引及 GPU joint limit。
-- [ ] 解析 translation、rotation、scale channel 与 step/linear 插值；明确不支持项并返回错误。
-- [ ] 计算 local pose、global pose 和最终 joint matrices，上传 shader skinning buffer。
-- [ ] 实现 Idle clip 时间推进、循环边界和固定 dt 采样。
-- [ ] 添加 bind pose、单 joint、层级 joint、循环首尾、缺失 channel 和畸形 skin 的确定性测试。
+- [x] 加载 skeleton hierarchy、joint、inverse bind matrix 和 bind pose，校验索引及 GPU joint limit。
+- [x] 解析 translation、rotation、scale channel 与 step/linear 插值；明确不支持项并返回错误。
+- [x] 计算 local pose、global pose 和最终 joint matrices，上传 shader skinning buffer。
+- [x] 实现 Idle clip 时间推进、循环边界和固定 dt 采样。
+- [x] 添加 bind pose、单 joint、层级 joint、循环首尾、缺失 channel 和畸形 skin 的确定性测试。
 
 **自动验证命令：** 执行四条全局门禁命令；运行 skeleton、animation sampling 和 skinning 离屏 tests。
 
