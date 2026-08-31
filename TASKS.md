@@ -21,7 +21,7 @@
 | 0 | 工程基线 | Done |
 | 1 | 透明窗口 | Done |
 | 2 | wgpu 基线 | Done |
-| 3 | 静态 GLB | Ready |
+| 3 | 静态 GLB | Verifying |
 | 4 | 骨骼与 Idle | Blocked |
 | 5 | Idle / Walk Cross Fade | Blocked |
 | 6 | 桌面移动 | Blocked |
@@ -178,7 +178,7 @@ evidence/
 
 ## 6. Phase 3：静态 GLB
 
-**状态：`Ready`**
+**状态：`Verifying`**
 
 **目标：** 通过受校验的 manifest 加载 Quaternius CC0 GLB，并渲染静态网格、纹理和材质。
 
@@ -188,12 +188,12 @@ evidence/
 
 **实现任务：**
 
-- [ ] 按架构定义实现 `AssetManager`、manifest schema、路径约束和大小/数量上限。
-- [ ] 保存来源 URL、作者、CC0 许可证、获取日期、SHA-256 和实际动画名称。
-- [ ] 解析 GLB scene、node transform、mesh primitive、index/vertex、纹理、sampler 和 MVP 所需 PBR material 属性。
-- [ ] 将 CPU 资源与 GPU 上传分离，Renderer 不直接读文件。
-- [ ] 实现 camera、深度缓冲和模型 transform，使模型在 320 x 320 viewport 内完整可见且比例稳定。
-- [ ] 添加有效、缺失、路径逃逸、损坏、超限和错误动画映射 fixture 测试。
+- [x] 按架构定义实现 `AssetManager`、manifest schema、路径约束和大小/数量上限。
+- [x] 保存来源 URL、作者、CC0 许可证、获取日期、SHA-256 和实际动画名称。
+- [x] 解析 GLB scene、node transform、mesh primitive、index/vertex、纹理、sampler 和 MVP 所需 PBR material 属性。
+- [x] 将 CPU 资源与 GPU 上传分离，Renderer 不直接读文件。
+- [x] 实现 camera、深度缓冲和模型 transform，使模型在 320 x 320 viewport 内完整可见且比例稳定。
+- [x] 添加有效、缺失、路径逃逸、损坏、超限和错误动画映射 fixture 测试。
 
 **自动验证命令：** 执行四条全局门禁命令；运行 asset fixture tests、GLB parse tests 和静态模型离屏 smoke。
 

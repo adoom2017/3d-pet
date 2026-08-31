@@ -1,0 +1,20 @@
+{
+  "format_version": 1,
+  "id": "quaternius_fox",
+  "name": "Quaternius Fox",
+  "model": "pet.glb",
+  "animations": {
+    "idle": "Idle",
+    "walk": "Walk"
+  },
+  "skeleton": {
+    "head_joint": "Head"
+  },
+  "source": {
+    "author": "Quaternius",
+    "url": "https://quaternius.com/packs/ultimateanimatedanimals.html",
+    "license": "CC0-1.0",
+    "retrieved_on": "2026-08-31",
+    "sha256": "c2cdd61d1ac40b1aa1a5b621f2ab1a39cf546d23a3a3a30e4cd4001273518870"
+  }
+}

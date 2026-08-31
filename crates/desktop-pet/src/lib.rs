@@ -1,6 +1,6 @@
 mod animation;
 pub mod app;
-mod asset;
+pub mod asset;
 pub mod config;
 mod display;
 pub mod error;

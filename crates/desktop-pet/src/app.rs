@@ -10,6 +10,7 @@ use winit::{
 };
 
 use crate::{
+    asset::{AssetManager, default_asset_root, default_manifest_path},
     config::AppConfig,
     error::AppError,
     platform::{self, PlatformBackend},
@@ -68,6 +69,7 @@ pub struct Application {
     window: Option<Arc<Window>>,
     _platform_backend: Option<Box<dyn PlatformBackend>>,
     renderer: Option<Renderer>,
+    _asset_manager: Option<AssetManager>,
     redraw_pending: bool,
     redraw_request_logged: bool,
     has_presented_frame: bool,
@@ -82,6 +84,7 @@ impl Application {
             window: None,
             _platform_backend: None,
             renderer: None,
+            _asset_manager: None,
             redraw_pending: false,
             redraw_request_logged: false,
             has_presented_frame: false,
@@ -116,7 +119,13 @@ impl Application {
         platform_backend
             .set_always_on_top(spec.always_on_top)
             .map_err(|error| AppError::Platform(error.to_string()))?;
-        let renderer = pollster::block_on(Renderer::new(Arc::clone(&window)))?;
+        let mut renderer = pollster::block_on(Renderer::new(Arc::clone(&window)))?;
+        let mut asset_manager = AssetManager::new(default_asset_root())?;
+        let pet_handle = asset_manager.load_pet(&default_manifest_path())?;
+        let pet = asset_manager
+            .pet(pet_handle)
+            .ok_or(crate::asset::AssetError::InvalidHandle)?;
+        renderer.upload_pet(pet);
 
         let physical_size = window.inner_size();
         tracing::info!(
@@ -136,6 +145,7 @@ impl Application {
         self.window = Some(window);
         self._platform_backend = Some(platform_backend);
         self.renderer = Some(renderer);
+        self._asset_manager = Some(asset_manager);
         self.redraw_pending = true;
         self.redraw_request_logged = false;
         if let Some(window) = self.window.as_ref() {
@@ -149,6 +159,40 @@ impl Application {
         tracing::error!(error = %error, "fatal application lifecycle error");
         self.fatal_error = Some(error);
         event_loop.exit();
+    }
+
+    fn render_pending_frame(&mut self, event_loop: &ActiveEventLoop, window_id: WindowId) {
+        let Some(renderer) = self.renderer.as_mut() else {
+            return;
+        };
+        match renderer.render() {
+            Ok(RenderOutcome::Presented) => {
+                self.redraw_pending = false;
+                event_loop.set_control_flow(ControlFlow::Wait);
+                if self.has_presented_frame {
+                    tracing::debug!(?window_id, "wgpu frame presented");
+                } else {
+                    self.has_presented_frame = true;
+                    tracing::info!(?window_id, "first wgpu frame presented");
+                }
+            }
+            Ok(RenderOutcome::SkippedOccluded) => {
+                self.redraw_pending = !self.has_presented_frame;
+                event_loop.set_control_flow(if self.redraw_pending {
+                    ControlFlow::Poll
+                } else {
+                    ControlFlow::Wait
+                });
+            }
+            Ok(RenderOutcome::Reconfigured | RenderOutcome::SkippedTimeout) => {
+                self.redraw_pending = true;
+                event_loop.set_control_flow(ControlFlow::Poll);
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+            Err(error) => self.fail_and_exit(event_loop, error.into()),
+        }
     }
 }
 
@@ -183,6 +227,7 @@ impl ApplicationHandler for Application {
             WindowEvent::Destroyed => {
                 tracing::debug!(?window_id, "window destroyed");
                 self.renderer = None;
+                self._asset_manager = None;
                 self.window = None;
             }
             WindowEvent::Resized(size) => {
@@ -215,33 +260,8 @@ impl ApplicationHandler for Application {
             }
             WindowEvent::RedrawRequested => {
                 tracing::debug!(?window_id, "processing pending wgpu redraw");
-                let Some(renderer) = self.renderer.as_mut() else {
-                    return;
-                };
-                let result = renderer.render();
-                match result {
-                    Ok(RenderOutcome::Presented) => {
-                        self.redraw_pending = false;
-                        event_loop.set_control_flow(ControlFlow::Wait);
-                        if self.has_presented_frame {
-                            tracing::debug!(?window_id, "wgpu frame presented");
-                        } else {
-                            self.has_presented_frame = true;
-                            tracing::info!(?window_id, "first wgpu frame presented");
-                        }
-                    }
-                    Ok(RenderOutcome::SkippedOccluded) => {
-                        self.redraw_pending = false;
-                        event_loop.set_control_flow(ControlFlow::Wait);
-                    }
-                    Ok(RenderOutcome::Reconfigured | RenderOutcome::SkippedTimeout) => {
-                        self.redraw_pending = true;
-                        event_loop.set_control_flow(ControlFlow::Poll);
-                        if let Some(window) = self.window.as_ref() {
-                            window.request_redraw();
-                        }
-                    }
-                    Err(error) => self.fail_and_exit(event_loop, error.into()),
+                if self.redraw_pending {
+                    self.render_pending_frame(event_loop, window_id);
                 }
             }
             WindowEvent::KeyboardInput { event, .. }
@@ -255,15 +275,19 @@ impl ApplicationHandler for Application {
         }
     }
 
-    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         if self.redraw_pending
             && let Some(window) = self.window.as_ref()
         {
+            let window_id = window.id();
             if !self.redraw_request_logged {
-                tracing::info!(window_id = ?window.id(), "requesting pending wgpu redraw");
+                tracing::info!(?window_id, "requesting pending wgpu redraw");
                 self.redraw_request_logged = true;
             }
             window.request_redraw();
+            if !self.has_presented_frame {
+                self.render_pending_frame(event_loop, window_id);
+            }
         }
     }
 

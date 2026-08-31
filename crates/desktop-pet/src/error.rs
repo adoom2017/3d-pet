@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::render::RendererError;
+use crate::{asset::AssetError, render::RendererError};
 
 #[derive(Debug, Error)]
 pub enum AppError {
@@ -18,6 +18,9 @@ pub enum AppError {
 
     #[error("renderer failed: {0}")]
     Renderer(#[from] RendererError),
+
+    #[error("asset loading failed: {0}")]
+    Asset(#[from] AssetError),
 }
 
 #[derive(Debug, Error)]
