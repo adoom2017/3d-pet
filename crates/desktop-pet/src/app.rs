@@ -10,7 +10,7 @@ use winit::{
 };
 
 use crate::{
-    animation::AnimationController,
+    animation::{AnimationController, AnimationRequest},
     asset::{AssetManager, default_asset_root, default_manifest_path},
     config::AppConfig,
     error::AppError,
@@ -133,7 +133,10 @@ impl Application {
         let pet = asset_manager
             .pet(pet_handle)
             .ok_or(crate::asset::AssetError::InvalidHandle)?;
-        let animation = AnimationController::idle(pet)
+        let mut animation = AnimationController::new(pet)
+            .map_err(|error| AppError::Animation(error.to_string()))?;
+        animation
+            .set_playback_speed(1.0)
             .map_err(|error| AppError::Animation(error.to_string()))?;
         tracing::info!(idle_clip = animation.clip_name(), "Idle animation selected");
         renderer.upload_pet(pet);
@@ -295,6 +298,33 @@ impl ApplicationHandler for Application {
                 tracing::debug!(?window_id, "processing pending wgpu redraw");
                 if self.redraw_pending {
                     self.render_pending_frame(event_loop, window_id);
+                }
+            }
+            WindowEvent::KeyboardInput { event, .. }
+                if event.state == ElementState::Pressed
+                    && !event.repeat
+                    && event.physical_key == PhysicalKey::Code(KeyCode::Space) =>
+            {
+                if let Some(animation) = self.animation.as_mut() {
+                    let request = match animation.current_request() {
+                        AnimationRequest::Idle => AnimationRequest::Walk,
+                        AnimationRequest::Walk => AnimationRequest::Idle,
+                    };
+                    if animation.request(request) {
+                        tracing::info!(?request, "animation transition requested");
+                        if let Some(window) = self.window.as_ref() {
+                            window.set_title(match request {
+                                AnimationRequest::Idle => "DesktopPet [Idle]",
+                                AnimationRequest::Walk => "DesktopPet [Walk]",
+                            });
+                        }
+                        self.redraw_pending = true;
+                        self.next_animation_frame = Some(Instant::now());
+                        event_loop.set_control_flow(ControlFlow::Poll);
+                        if let Some(window) = self.window.as_ref() {
+                            window.request_redraw();
+                        }
+                    }
                 }
             }
             WindowEvent::KeyboardInput { event, .. }

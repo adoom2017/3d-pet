@@ -1050,7 +1050,7 @@ mod tests {
         let skins: Vec<GpuSkin> = (0..=asset.rig.skins.len())
             .map(|_| create_gpu_skin(&device, &camera_layout, &camera_buffer))
             .collect();
-        let controller = crate::animation::AnimationController::idle(asset)
+        let controller = crate::animation::AnimationController::new(asset)
             .expect("default Idle animation must initialize");
         for (gpu_skin, matrices) in skins.iter().skip(1).zip(controller.skin_matrices()) {
             let palette = joint_palette(matrices);

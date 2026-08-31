@@ -23,7 +23,7 @@
 | 2 | wgpu 基线 | Done |
 | 3 | 静态 GLB | Done |
 | 4 | 骨骼与 Idle | Done |
-| 5 | Idle / Walk Cross Fade | Ready |
+| 5 | Idle / Walk Cross Fade | Verifying |
 | 6 | 桌面移动 | Blocked |
 | 7 | PetBrain | Blocked |
 | 8 | 边界与显示器 | Blocked |
@@ -243,7 +243,7 @@ evidence/
 
 ## 8. Phase 5：Idle / Walk Cross Fade
 
-**状态：`Ready`**
+**状态：`Verifying`**
 
 **目标：** 通过语义动画名称播放 Idle / Walk，支持循环、速度倍率和 250 ms Cross Fade。
 
@@ -253,11 +253,11 @@ evidence/
 
 **实现任务：**
 
-- [ ] 实现 `AnimationController` 和 `AnimationRequest`，业务层只使用 `idle` / `walk` 语义。
-- [ ] 实现 clip 循环、播放速度、重复请求幂等和不存在 clip 的可读错误。
-- [ ] 对两侧 local joint transform 做 250 ms Cross Fade，再计算全局 joint matrices。
-- [ ] 覆盖 Idle -> Walk、Walk -> Idle、过渡反向、过渡中重新请求和首尾循环。
-- [ ] 用固定输入断言 0 ms、125 ms、250 ms 姿态，避免只靠视觉判断。
+- [x] 实现 `AnimationController` 和 `AnimationRequest`，业务层只使用 `idle` / `walk` 语义。
+- [x] 实现 clip 循环、播放速度、重复请求幂等和不存在 clip 的可读错误。
+- [x] 对两侧 local joint transform 做 250 ms Cross Fade，再计算全局 joint matrices。
+- [x] 覆盖 Idle -> Walk、Walk -> Idle、过渡反向、过渡中重新请求和首尾循环。
+- [x] 用固定输入断言 0 ms、125 ms、250 ms 姿态，避免只靠视觉判断。
 
 **自动验证命令：** 执行四条全局门禁命令；运行 AnimationController 确定性 tests 和 skinning smoke。
 
@@ -267,7 +267,7 @@ evidence/
 
 **Windows 实机验收：** 不要求；Windows 门禁仅为 CI 编译、Clippy、测试和构建通过。
 
-**产物与验证证据：** AnimationController、过渡测试，`evidence/phase-05/verification.md`、macOS 录屏和 CI URL。
+**产物与验证证据：** AnimationController、过渡测试，`evidence/phase-05/verification.md`、macOS 截图和 CI URL。
 
 **阶段退出条件：** 250 ms 双向过渡数值测试与 macOS 视觉验收通过，所有门禁通过。
 
