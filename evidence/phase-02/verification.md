@@ -1,6 +1,6 @@
 # Phase 2 verification
 
-Status: `Verifying`
+Status: `Done`
 
 Implementation commit: `5a86b21ecfe55400df14e5e2a32db3eac65f659b`
 
@@ -45,4 +45,9 @@ The 98,606 colored triangle pixels are fully opaque. Every pixel outside the tri
 
 ## CI acceptance
 
-Pending push of the implementation and verification commits. Phase 2 remains `Verifying` until both `macos-latest` and `windows-latest` pass the four global gates.
+| Date | Commit | Platform | Result | Evidence |
+| --- | --- | --- | --- | --- |
+| 2026-08-31 | `b731fdb0a9ddf1abcdac6d440644ec4be56d3756` | `macos-latest` | Pass | <https://github.com/adoom2017/3d-pet/actions/runs/33351372856> |
+| 2026-08-31 | `b731fdb0a9ddf1abcdac6d440644ec4be56d3756` | `windows-latest` | Pass | <https://github.com/adoom2017/3d-pet/actions/runs/33351372856> |
+
+The macOS runtime/visual acceptance, deterministic renderer tests, local gates, and both CI jobs passed. Phase 2 is `Done`; Phase 3 is `Ready`.

@@ -20,8 +20,8 @@
 | --- | --- | --- |
 | 0 | 工程基线 | Done |
 | 1 | 透明窗口 | Done |
-| 2 | wgpu 基线 | Verifying |
-| 3 | 静态 GLB | Blocked |
+| 2 | wgpu 基线 | Done |
+| 3 | 静态 GLB | Ready |
 | 4 | 骨骼与 Idle | Blocked |
 | 5 | Idle / Walk Cross Fade | Blocked |
 | 6 | 桌面移动 | Blocked |
@@ -146,7 +146,7 @@ evidence/
 
 ## 5. Phase 2：wgpu 基线
 
-**状态：`Verifying`**
+**状态：`Done`**
 
 **目标：** 初始化 adapter、device、queue 和透明 surface，以 alpha 0 清屏并绘制可见三角形。
 
@@ -178,7 +178,7 @@ evidence/
 
 ## 6. Phase 3：静态 GLB
 
-**状态：`Blocked`**
+**状态：`Ready`**
 
 **目标：** 通过受校验的 manifest 加载 Quaternius CC0 GLB，并渲染静态网格、纹理和材质。
 

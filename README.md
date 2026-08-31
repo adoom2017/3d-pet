@@ -1,6 +1,6 @@
 # DesktopPet
 
-DesktopPet is a lightweight 3D desktop pet for macOS with Windows compile-and-test support. Phase 1's transparent, borderless, always-on-top window is complete, and Phase 2 is ready to establish the wgpu rendering baseline. macOS is the runtime, visual, and interaction reference platform; Windows is continuously checked by CI.
+DesktopPet is a lightweight 3D desktop pet for macOS with Windows compile-and-test support. Phase 2's wgpu renderer now presents a colored triangle over a truly transparent window, and Phase 3 is ready to add the first static GLB pet. macOS is the runtime, visual, and interaction reference platform; Windows is continuously checked by CI.
 
 ## Prerequisites
 
