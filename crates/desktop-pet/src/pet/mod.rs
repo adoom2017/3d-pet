@@ -8,6 +8,7 @@ use crate::display::DesktopPosition;
 
 pub(crate) const DEFAULT_WALK_SPEED_LOGICAL_PX_PER_S: f64 = 80.0;
 const DEFAULT_TURN_DURATION: Duration = Duration::from_millis(250);
+const DEFAULT_INTERACTION_DURATION: Duration = Duration::from_millis(500);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum HorizontalDirection {
@@ -148,6 +149,7 @@ pub(crate) struct BehaviorStateMachine {
     state: PetState,
     facing: HorizontalDirection,
     turn_elapsed: Duration,
+    interaction_elapsed: Duration,
     pending_walk: Option<HorizontalDirection>,
 }
 
@@ -157,6 +159,7 @@ impl Default for BehaviorStateMachine {
             state: PetState::Idle,
             facing: HorizontalDirection::Right,
             turn_elapsed: Duration::ZERO,
+            interaction_elapsed: Duration::ZERO,
             pending_walk: None,
         }
     }
@@ -192,6 +195,7 @@ impl BehaviorStateMachine {
         self.state = state;
         self.pending_walk = None;
         self.turn_elapsed = Duration::ZERO;
+        self.interaction_elapsed = Duration::ZERO;
     }
 }
 
@@ -232,6 +236,7 @@ impl PetStateMachine for BehaviorStateMachine {
             }
             PetIntent::Interact if context.priority >= TransitionPriority::Explicit => {
                 self.pending_walk = None;
+                self.interaction_elapsed = Duration::ZERO;
                 self.transition_to(PetState::Interacting, None, PetAnimationIntent::Idle)
             }
             PetIntent::Interact | PetIntent::LookAt { .. } => {
@@ -241,18 +246,31 @@ impl PetStateMachine for BehaviorStateMachine {
     }
 
     fn fixed_update(&mut self, delta: Duration, _context: &TransitionContext) -> StateTransition {
-        if self.state != PetState::Turning {
-            return StateTransition::unchanged(self.state);
+        match self.state {
+            PetState::Turning => {
+                self.turn_elapsed = self.turn_elapsed.saturating_add(delta);
+                if self.turn_elapsed < DEFAULT_TURN_DURATION {
+                    return StateTransition::unchanged(self.state);
+                }
+                let Some(direction) = self.pending_walk.take() else {
+                    return StateTransition::rejected(
+                        self.state,
+                        TransitionRejection::InvalidIntent,
+                    );
+                };
+                self.turn_elapsed = Duration::ZERO;
+                self.transition_to(PetState::Walking, Some(direction), PetAnimationIntent::Walk)
+            }
+            PetState::Interacting => {
+                self.interaction_elapsed = self.interaction_elapsed.saturating_add(delta);
+                if self.interaction_elapsed < DEFAULT_INTERACTION_DURATION {
+                    return StateTransition::unchanged(self.state);
+                }
+                self.interaction_elapsed = Duration::ZERO;
+                self.transition_to(PetState::Idle, None, PetAnimationIntent::Idle)
+            }
+            _ => StateTransition::unchanged(self.state),
         }
-        self.turn_elapsed = self.turn_elapsed.saturating_add(delta);
-        if self.turn_elapsed < DEFAULT_TURN_DURATION {
-            return StateTransition::unchanged(self.state);
-        }
-        let Some(direction) = self.pending_walk.take() else {
-            return StateTransition::rejected(self.state, TransitionRejection::InvalidIntent);
-        };
-        self.turn_elapsed = Duration::ZERO;
-        self.transition_to(PetState::Walking, Some(direction), PetAnimationIntent::Walk)
     }
 }
 
@@ -598,6 +616,25 @@ mod tests {
                 .next,
             PetState::Interacting
         );
+    }
+
+    #[test]
+    fn explicit_interaction_returns_to_idle_after_fixed_duration() {
+        let mut machine = BehaviorStateMachine::default();
+        let interaction = machine.apply(PetIntent::Interact, &TransitionContext::EXPLICIT);
+        assert_eq!(interaction.previous, PetState::Idle);
+        assert_eq!(interaction.next, PetState::Interacting);
+        assert_eq!(interaction.animation, Some(PetAnimationIntent::Idle));
+        assert_eq!(
+            machine
+                .fixed_update(Duration::from_millis(499), &TransitionContext::BRAIN)
+                .outcome,
+            TransitionOutcome::Unchanged
+        );
+        let idle = machine.fixed_update(Duration::from_millis(1), &TransitionContext::BRAIN);
+        assert_eq!(idle.previous, PetState::Interacting);
+        assert_eq!(idle.next, PetState::Idle);
+        assert_eq!(idle.animation, Some(PetAnimationIntent::Idle));
     }
 
     #[test]

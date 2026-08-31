@@ -2,20 +2,22 @@
 
 use std::sync::Arc;
 
-use objc2_app_kit::NSScreen;
+use objc2_app_kit::{NSEvent, NSScreen, NSView};
 use objc2_foundation::MainThreadMarker;
 use winit::{
     dpi::LogicalPosition,
     platform::macos::{MonitorHandleExtMacOS, WindowAttributesExtMacOS, WindowExtMacOS},
+    raw_window_handle::{HasWindowHandle, RawWindowHandle},
     window::{Window, WindowAttributes, WindowLevel},
 };
 
-use super::{PlatformBackend, PlatformError};
+use super::{IdempotentBool, PlatformBackend, PlatformError};
 use crate::display::{DesktopPosition, LogicalSize, MonitorId, MonitorInfo};
 
 pub(super) struct NativePlatformBackend {
     window: Arc<Window>,
     always_on_top: Option<bool>,
+    click_through: IdempotentBool,
 }
 
 impl NativePlatformBackend {
@@ -24,7 +26,26 @@ impl NativePlatformBackend {
         Self {
             window,
             always_on_top: None,
+            click_through: IdempotentBool::default(),
         }
+    }
+
+    fn primary_screen_top() -> Result<f64, PlatformError> {
+        let marker = MainThreadMarker::new().ok_or_else(|| {
+            PlatformError::ReadCursorPosition(
+                "AppKit cursor access must occur on the macOS main thread".to_owned(),
+            )
+        })?;
+        let screens = NSScreen::screens(marker);
+        // SAFETY: AppKit returns an immutable NSArray here; firstObject retains the primary
+        // NSScreen, which is documented as the first element of NSScreen.screens.
+        let primary = unsafe { screens.firstObject() }.ok_or_else(|| {
+            PlatformError::ReadCursorPosition(
+                "macOS did not report a primary screen for cursor normalization".to_owned(),
+            )
+        })?;
+        let frame = primary.frame();
+        Ok(frame.origin.y + frame.size.height)
     }
 }
 
@@ -40,6 +61,53 @@ impl PlatformBackend for NativePlatformBackend {
             self.always_on_top = Some(enabled);
         }
         Ok(())
+    }
+
+    fn set_click_through(&mut self, enabled: bool) -> Result<(), PlatformError> {
+        let window = Arc::clone(&self.window);
+        self.click_through.apply(enabled, move |requested| {
+            if MainThreadMarker::new().is_none() {
+                return Err(PlatformError::ConfigureMouseHandling(
+                    "NSWindow mouse handling must be configured on the macOS main thread"
+                        .to_owned(),
+                ));
+            }
+            let handle = window.window_handle().map_err(|error| {
+                PlatformError::ConfigureMouseHandling(format!(
+                    "winit did not expose an AppKit window handle: {error}"
+                ))
+            })?;
+            let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
+                return Err(PlatformError::ConfigureMouseHandling(
+                    "winit exposed a non-AppKit window handle on macOS".to_owned(),
+                ));
+            };
+            // SAFETY: raw-window-handle guarantees ns_view is a live NSView owned by the winit
+            // window, whose Arc remains alive throughout this backend call.
+            let view = unsafe { &*handle.ns_view.as_ptr().cast::<NSView>() };
+            let native_window = view.window().ok_or_else(|| {
+                PlatformError::ConfigureMouseHandling(
+                    "the winit NSView is not attached to an NSWindow".to_owned(),
+                )
+            })?;
+            native_window.setIgnoresMouseEvents(requested);
+            Ok::<_, PlatformError>(())
+        })?;
+        Ok(())
+    }
+
+    fn cursor_position(&self) -> Result<Option<DesktopPosition>, PlatformError> {
+        let primary_top = Self::primary_screen_top()?;
+        // SAFETY: NSEvent's class cursor query is called from winit's AppKit main thread.
+        let native = unsafe { NSEvent::mouseLocation() };
+        let position = DesktopPosition::new(native.x, primary_top - native.y);
+        if !position.is_finite() {
+            return Err(PlatformError::ReadCursorPosition(format!(
+                "AppKit returned non-finite coordinates ({}, {})",
+                native.x, native.y
+            )));
+        }
+        Ok(Some(position))
     }
 
     fn window_position(&self) -> Result<DesktopPosition, PlatformError> {
@@ -70,10 +138,14 @@ impl PlatformBackend for NativePlatformBackend {
                 "NSScreen access must occur on the macOS main thread".to_owned(),
             )
         })?;
-        let main_screen = NSScreen::mainScreen(marker).ok_or_else(|| {
-            PlatformError::EnumerateMonitors("macOS did not report a main screen".to_owned())
+        let screens = NSScreen::screens(marker);
+        // SAFETY: AppKit returns an immutable NSArray and documents its first item as the
+        // primary screen. Retaining that item keeps it alive through this enumeration.
+        let primary = unsafe { screens.firstObject() }.ok_or_else(|| {
+            PlatformError::EnumerateMonitors("macOS did not report a primary screen".to_owned())
         })?;
-        let main_height = main_screen.frame().size.height;
+        let primary_frame = primary.frame();
+        let primary_top = primary_frame.origin.y + primary_frame.size.height;
         let primary_id = self
             .window
             .primary_monitor()
@@ -90,7 +162,7 @@ impl PlatformBackend for NativePlatformBackend {
                 let visible = screen.visibleFrame();
                 let origin = DesktopPosition::new(
                     visible.origin.x,
-                    main_height - visible.origin.y - visible.size.height,
+                    primary_top - visible.origin.y - visible.size.height,
                 );
                 MonitorInfo::new(
                     MonitorId(u64::from(monitor.native_id())),

@@ -130,9 +130,16 @@ pub(crate) struct HitUpdate {
     pub changed: bool,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum InteractionAction {
+    None,
+    ClickPet,
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct InteractionController {
     current_hit: bool,
+    pressed_on_pet: bool,
 }
 
 impl InteractionController {
@@ -152,6 +159,28 @@ impl InteractionController {
     #[cfg(test)]
     pub fn current_hit(&self) -> bool {
         self.current_hit
+    }
+
+    pub fn set_left_pressed(&mut self, pressed: bool) -> InteractionAction {
+        if pressed {
+            self.pressed_on_pet = self.current_hit;
+            return InteractionAction::None;
+        }
+        let clicked = self.pressed_on_pet && self.current_hit;
+        self.pressed_on_pet = false;
+        if clicked {
+            InteractionAction::ClickPet
+        } else {
+            InteractionAction::None
+        }
+    }
+
+    pub fn cancel_pointer(&mut self) {
+        self.pressed_on_pet = false;
+    }
+
+    pub fn click_through_required(&self) -> bool {
+        !self.current_hit && !self.pressed_on_pet
     }
 }
 
@@ -301,5 +330,49 @@ mod tests {
             }
         );
         assert!(!controller.current_hit());
+    }
+
+    #[test]
+    fn complete_click_on_pet_emits_action() {
+        let region = RectHitRegion::new([10.0, 10.0], [20.0, 20.0]).unwrap();
+        let mut controller = InteractionController::default();
+        controller.update_hit(Some([15.0, 15.0]), Some(&region));
+        assert_eq!(controller.set_left_pressed(true), InteractionAction::None);
+        assert!(!controller.click_through_required());
+        assert_eq!(
+            controller.set_left_pressed(false),
+            InteractionAction::ClickPet
+        );
+    }
+
+    #[test]
+    fn leaving_pet_or_cancelling_suppresses_click() {
+        let region = RectHitRegion::new([10.0, 10.0], [20.0, 20.0]).unwrap();
+        let mut controller = InteractionController::default();
+        controller.update_hit(Some([15.0, 15.0]), Some(&region));
+        controller.set_left_pressed(true);
+        controller.update_hit(Some([30.0, 30.0]), Some(&region));
+        assert!(
+            !controller.click_through_required(),
+            "a pressed pointer keeps event delivery until release"
+        );
+        assert_eq!(controller.set_left_pressed(false), InteractionAction::None);
+        assert!(controller.click_through_required());
+
+        controller.update_hit(Some([15.0, 15.0]), Some(&region));
+        controller.set_left_pressed(true);
+        controller.cancel_pointer();
+        assert_eq!(controller.set_left_pressed(false), InteractionAction::None);
+    }
+
+    #[test]
+    fn rapid_hit_changes_map_directly_to_platform_policy() {
+        let region = RectHitRegion::new([10.0, 10.0], [20.0, 20.0]).unwrap();
+        let mut controller = InteractionController::default();
+        let policies = [None, Some([15.0, 15.0]), None, Some([20.0, 20.0])].map(|position| {
+            controller.update_hit(position, Some(&region));
+            controller.click_through_required()
+        });
+        assert_eq!(policies, [true, false, true, false]);
     }
 }

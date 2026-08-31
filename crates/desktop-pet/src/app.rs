@@ -21,7 +21,10 @@ use crate::{
     },
     error::AppError,
     input::MouseState,
-    interaction::{DEFAULT_HIT_PADDING_LOGICAL, HitRegion, InteractionController, RectHitRegion},
+    interaction::{
+        DEFAULT_HIT_PADDING_LOGICAL, HitRegion, InteractionAction, InteractionController,
+        RectHitRegion,
+    },
     pet::{
         BehaviorStateMachine, BrainConfig, HorizontalDirection, MonotonicClock, MovementController,
         PetAnimationIntent, PetBrain, PetIntent, PetObservation, PetState, PetStateMachine,
@@ -112,6 +115,7 @@ pub struct Application {
     display_manager: Option<DisplayManager>,
     mouse_state: MouseState,
     interaction: InteractionController,
+    click_through_active: Option<bool>,
     brain: Option<WanderingPetBrain>,
     brain_rng: SplitMix64,
     state_machine: Option<BehaviorStateMachine>,
@@ -139,6 +143,7 @@ impl Application {
             display_manager: None,
             mouse_state: MouseState::default(),
             interaction: InteractionController::default(),
+            click_through_active: None,
             brain: None,
             brain_rng: SplitMix64::seeded(DEFAULT_BRAIN_SEED),
             state_machine: None,
@@ -235,6 +240,7 @@ impl Application {
         self.display_manager = Some(display_manager);
         self.mouse_state = MouseState::default();
         self.interaction = InteractionController::default();
+        self.click_through_active = None;
         self.brain = Some(
             WanderingPetBrain::new(BrainConfig::default())
                 .map_err(|error| AppError::Behavior(error.to_string()))?,
@@ -247,6 +253,7 @@ impl Application {
         self.last_logic_update = Some(Instant::now());
         self.redraw_pending = true;
         self.redraw_request_logged = false;
+        self.refresh_pointer_from_platform()?;
         if let Some(window) = self.window.as_ref() {
             window.set_visible(true);
         }
@@ -256,6 +263,7 @@ impl Application {
 
     fn fail_and_exit(&mut self, event_loop: &ActiveEventLoop, error: AppError) {
         tracing::error!(error = %error, "fatal application lifecycle error");
+        self.restore_mouse_handling();
         self.fatal_error = Some(error);
         event_loop.exit();
     }
@@ -296,6 +304,7 @@ impl Application {
         if let Some(boundary) = boundary {
             self.mouse_state.update_window_origin(boundary.position);
             self.update_pointer_hit();
+            self.sync_click_through()?;
         }
         if let Some(Some(turn)) = boundary.map(|boundary| boundary.turn) {
             tracing::info!(?turn, "desktop work-area boundary requested a turn");
@@ -354,6 +363,60 @@ impl Application {
                 window_logical = ?self.mouse_state.window_logical_position,
                 "pet pointer hit evaluated"
             );
+        }
+    }
+
+    fn sync_click_through(&mut self) -> Result<(), AppError> {
+        let required = self.interaction.click_through_required();
+        self.platform_backend
+            .as_mut()
+            .ok_or_else(|| AppError::Platform("platform backend is unavailable".to_owned()))?
+            .set_click_through(required)
+            .map_err(|error| AppError::Platform(error.to_string()))?;
+        if self.click_through_active != Some(required) {
+            tracing::info!(enabled = required, "platform mouse click-through changed");
+            self.click_through_active = Some(required);
+        }
+        Ok(())
+    }
+
+    fn refresh_pointer_from_platform(&mut self) -> Result<(), AppError> {
+        let desktop = self
+            .platform_backend
+            .as_ref()
+            .ok_or_else(|| AppError::Platform("platform backend is unavailable".to_owned()))?
+            .cursor_position()
+            .map_err(|error| AppError::Platform(error.to_string()))?;
+        if let Some(desktop) = desktop {
+            let window_origin = self
+                .movement
+                .as_ref()
+                .map(MovementController::position)
+                .unwrap_or_default();
+            self.mouse_state
+                .update_cursor_desktop(desktop, window_origin);
+        } else {
+            self.mouse_state.clear_cursor();
+        }
+        self.update_pointer_hit();
+        self.sync_click_through()
+    }
+
+    fn restore_mouse_handling(&mut self) {
+        self.interaction.cancel_pointer();
+        self.mouse_state.set_left_pressed(false);
+        if let Some(platform_backend) = self.platform_backend.as_mut()
+            && let Err(error) = platform_backend.set_click_through(false)
+        {
+            tracing::warn!(%error, "failed to restore native mouse handling during shutdown");
+        }
+        self.click_through_active = Some(false);
+    }
+
+    fn apply_interaction_action(&mut self, action: InteractionAction) {
+        if action == InteractionAction::ClickPet {
+            tracing::info!("complete pet click submitted as interaction intent");
+            self.apply_pet_intent(PetIntent::Interact, TransitionContext::EXPLICIT);
         }
     }
 
@@ -478,6 +541,7 @@ impl Application {
             );
         }
         for _ in 0..batch.steps {
+            self.refresh_pointer_from_platform()?;
             self.monitor_refresh_elapsed = self
                 .monitor_refresh_elapsed
                 .saturating_add(FIXED_UPDATE_INTERVAL);
@@ -569,6 +633,7 @@ impl ApplicationHandler for Application {
         match event {
             WindowEvent::CloseRequested => {
                 tracing::info!(?window_id, "window close requested");
+                self.restore_mouse_handling();
                 event_loop.exit();
             }
             WindowEvent::Destroyed => {
@@ -580,6 +645,7 @@ impl ApplicationHandler for Application {
                 self.display_manager = None;
                 self.mouse_state = MouseState::default();
                 self.interaction = InteractionController::default();
+                self.click_through_active = None;
                 self.brain = None;
                 self.state_machine = None;
                 self.platform_backend = None;
@@ -598,6 +664,10 @@ impl ApplicationHandler for Application {
                     renderer.resize(size);
                 }
                 self.update_pointer_hit();
+                if let Err(error) = self.sync_click_through() {
+                    self.fail_and_exit(event_loop, error);
+                    return;
+                }
                 self.redraw_pending = size.width > 0 && size.height > 0;
                 event_loop.set_control_flow(if self.redraw_pending {
                     ControlFlow::Poll
@@ -618,6 +688,10 @@ impl ApplicationHandler for Application {
                     return;
                 }
                 self.update_pointer_hit();
+                if let Err(error) = self.sync_click_through() {
+                    self.fail_and_exit(event_loop, error);
+                    return;
+                }
                 event_loop.set_control_flow(ControlFlow::Poll);
             }
             WindowEvent::CursorMoved { position, .. } => {
@@ -635,19 +709,41 @@ impl ApplicationHandler for Application {
                         DesktopPhysicalSize::new(size.width, size.height),
                     );
                     self.update_pointer_hit();
+                    if let Err(error) = self.sync_click_through() {
+                        self.fail_and_exit(event_loop, error);
+                    }
                 }
             }
             WindowEvent::CursorLeft { .. } => {
                 self.mouse_state.clear_cursor();
                 self.update_pointer_hit();
+                if let Err(error) = self.sync_click_through() {
+                    self.fail_and_exit(event_loop, error);
+                }
             }
             WindowEvent::MouseInput {
                 state,
                 button: MouseButton::Left,
                 ..
             } => {
-                self.mouse_state
-                    .set_left_pressed(state == ElementState::Pressed);
+                let pressed = state == ElementState::Pressed;
+                self.mouse_state.set_left_pressed(pressed);
+                let action = self.interaction.set_left_pressed(pressed);
+                self.apply_interaction_action(action);
+                if let Err(error) = self.sync_click_through() {
+                    self.fail_and_exit(event_loop, error);
+                }
+            }
+            WindowEvent::Focused(false) => {
+                tracing::debug!(
+                    ?window_id,
+                    "window focus lost; cancelling pointer interaction"
+                );
+                self.interaction.cancel_pointer();
+                self.mouse_state.set_left_pressed(false);
+                if let Err(error) = self.refresh_pointer_from_platform() {
+                    self.fail_and_exit(event_loop, error);
+                }
             }
             WindowEvent::ModifiersChanged(modifiers) => {
                 self.mouse_state.set_modifiers(modifiers.state());
@@ -711,6 +807,7 @@ impl ApplicationHandler for Application {
     }
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        self.restore_mouse_handling();
         tracing::debug!("winit event loop exiting");
     }
 }

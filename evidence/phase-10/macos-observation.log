@@ -1,0 +1,36 @@
+Phase 10 macOS click-through observation
+Date: 2026-08-31
+Platform: macOS 26.6.2 (25G83), arm64, Apple M5, Retina 2x
+Implementation commit: pending
+
+Observed window and render configuration:
+logical_size=320x320 physical_size=640x640 scale_factor=2.0
+adapter=Apple M5 backend=Metal
+monitors=2 both scale_factor=2.0
+
+Transparent-area click:
+baseline_frontmost=Finder
+click=transparent window corner, dynamically resolved as screen point (319, 186)
+frontmost_after_click=DingTalk
+result=Pass; the actual underlying application received and activated from the click
+
+Same-process pet interaction recovery:
+2026-08-31T10:25:20.169162Z INFO pet pointer hit changed hit=true window_logical=Some([64.0, 157.0]) desktop=Some(DesktopPosition { x: 249.3333259200004, y: 331.0 }) region=Some(RectHitRegion { min: [56.85914421081543, 84.73554992675781], max: [233.1452522277832, 267.64690017700195] })
+2026-08-31T10:25:20.177579Z INFO complete pet click submitted as interaction intent
+2026-08-31T10:25:20.177611Z INFO pet intent evaluated intent=Interact context=TransitionContext { priority: Explicit }
+2026-08-31T10:25:20.177637Z INFO pet state transition applied transition=StateTransition { previous: Walking, next: Interacting, outcome: Applied, facing: None, animation: Some(Idle) }
+2026-08-31T10:25:20.691628Z INFO pet state transition applied transition=StateTransition { previous: Interacting, next: Idle, outcome: Applied, facing: None, animation: Some(Idle) }
+
+Representative rapid enter/leave recovery:
+2026-08-31T10:25:22.291539Z INFO pet pointer hit changed hit=true window_logical=Some([77.00000735999961, 226.0])
+2026-08-31T10:25:22.291715Z INFO platform mouse click-through changed enabled=false
+2026-08-31T10:25:22.340884Z INFO pet pointer hit changed hit=false window_logical=Some([311.0000073599996, 238.0])
+2026-08-31T10:25:22.341165Z INFO platform mouse click-through changed enabled=true
+2026-08-31T10:25:22.674815Z INFO pet pointer hit changed hit=true window_logical=Some([215.6666742399996, 235.0])
+2026-08-31T10:25:22.674960Z INFO platform mouse click-through changed enabled=false
+2026-08-31T10:25:22.691453Z INFO pet pointer hit changed hit=false window_logical=Some([-40.66665904000041, 226.0])
+2026-08-31T10:25:22.691707Z INFO platform mouse click-through changed enabled=true
+
+Result: Pass. Transparent clicks reached the underlying application, the ignored window
+recovered pet interaction without restart, complete clicks produced Interact, rapid crossings
+did not leave a permanent state, and destroying the test window removed its input behavior.

@@ -13,6 +13,20 @@ pub(crate) struct MouseState {
 }
 
 impl MouseState {
+    pub fn update_cursor_desktop(
+        &mut self,
+        desktop: DesktopPosition,
+        window_origin: DesktopPosition,
+    ) {
+        if !desktop.is_finite() {
+            self.clear_cursor();
+            return;
+        }
+        self.desktop_position = Some(desktop);
+        self.window_logical_position =
+            DisplayManager::desktop_to_window_logical(desktop, window_origin);
+    }
+
     pub fn update_cursor_physical(
         &mut self,
         physical: [f64; 2],
@@ -133,6 +147,20 @@ mod tests {
         assert_eq!(
             state.desktop_position,
             Some(DesktopPosition::new(-80.0, 80.0))
+        );
+    }
+
+    #[test]
+    fn global_cursor_update_supports_points_outside_the_window() {
+        let mut state = MouseState::default();
+        state.update_cursor_desktop(
+            DesktopPosition::new(-40.0, 500.0),
+            DesktopPosition::new(10.0, 300.0),
+        );
+        assert_eq!(state.window_logical_position, Some([-50.0, 200.0]));
+        assert_eq!(
+            state.desktop_position,
+            Some(DesktopPosition::new(-40.0, 500.0))
         );
     }
 }
