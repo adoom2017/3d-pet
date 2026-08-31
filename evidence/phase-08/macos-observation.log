@@ -1,7 +1,7 @@
 Phase 8 macOS runtime observation
 Date: 2026-08-31
 Platform: macOS 26.6.2 (25G83), arm64, Apple M5
-Build: local debug candidate based on 36c3467ff8bad374208a64db862631503d5ade7a
+Implementation commit: dd158a9fb784336ed933cf6554698463e8420e4b
 
 Observed monitor work-area snapshot:
 2026-08-31T07:40:47.597489Z INFO monitor_id=1 x=0.0 y=33.0 width=1512.0 height=882.0 scale_factor=2.0 primary=true

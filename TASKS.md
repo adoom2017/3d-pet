@@ -26,8 +26,8 @@
 | 5 | Idle / Walk Cross Fade | Done |
 | 6 | 桌面移动 | Done |
 | 7 | PetBrain | Done |
-| 8 | 边界与显示器 | Verifying |
-| 9 | 命中测试 | Blocked |
+| 8 | 边界与显示器 | Done |
+| 9 | 命中测试 | Ready |
 | 10 | 平台鼠标穿透 | Blocked |
 | 11 | 拖动 | Blocked |
 | 12 | 重力与落地 | Blocked |
@@ -339,7 +339,7 @@ evidence/
 
 ## 11. Phase 8：边界与显示器
 
-**状态：`Verifying`**
+**状态：`Done`**
 
 **目标：** 支持显示器工作区、负坐标、不同 DPI、窗口跨屏、边缘夹紧和转身。
 
@@ -372,7 +372,7 @@ evidence/
 
 ## 12. Phase 9：命中测试
 
-**状态：`Blocked`**
+**状态：`Ready`**
 
 **目标：** 统一鼠标坐标转换，用 2D bounding region 或 hit mask 区分宠物区域与透明区域。
 
