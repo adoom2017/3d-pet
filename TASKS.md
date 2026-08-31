@@ -470,7 +470,7 @@ evidence/
 
 ## 15. Phase 12：重力与落地
 
-**状态：`Ready`**
+**状态：`In Progress`**
 
 **目标：** 拖动释放后完成 Falling -> Landing -> Idle，包含释放速度、重力积分和工作区地面夹紧。
 

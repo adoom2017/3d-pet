@@ -247,6 +247,15 @@ impl DisplayManager {
         )
     }
 
+    pub fn ground_y(
+        &self,
+        window_position: DesktopPosition,
+        window_size: LogicalSize,
+    ) -> Option<f64> {
+        let active = self.active_monitor(window_position, window_size)?;
+        Some((active.bottom() - window_size.height).max(active.work_area_origin.y))
+    }
+
     pub fn constrain_horizontal_move(
         &self,
         current: DesktopPosition,
@@ -335,6 +344,36 @@ mod tests {
         assert_eq!(
             DesktopPosition::new(-10.6, 20.5).rounded(),
             DesktopPosition::new(-11.0, 21.0)
+        );
+    }
+
+    #[test]
+    fn ground_y_uses_the_active_monitor_work_area() {
+        let manager = DisplayManager::new(vec![
+            monitor(1, 0.0, 20.0, 1_000.0, 780.0, 1.0, true),
+            monitor(2, 1_000.0, -100.0, 1_200.0, 900.0, 2.0, false),
+        ]);
+        let size = LogicalSize::new(320.0, 320.0);
+        assert_eq!(
+            manager.ground_y(DesktopPosition::new(100.0, 100.0), size),
+            Some(480.0)
+        );
+        assert_eq!(
+            manager.ground_y(DesktopPosition::new(1_200.0, -50.0), size),
+            Some(480.0)
+        );
+    }
+
+    #[test]
+    fn ground_y_handles_a_work_area_smaller_than_the_window() {
+        let manager =
+            DisplayManager::new(vec![monitor(1, -500.0, -200.0, 200.0, 100.0, 1.5, true)]);
+        assert_eq!(
+            manager.ground_y(
+                DesktopPosition::new(-500.0, -200.0),
+                LogicalSize::new(320.0, 320.0)
+            ),
+            Some(-200.0)
         );
     }
 

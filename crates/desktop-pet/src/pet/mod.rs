@@ -7,8 +7,10 @@ use thiserror::Error;
 use crate::display::DesktopPosition;
 
 pub(crate) const DEFAULT_WALK_SPEED_LOGICAL_PX_PER_S: f64 = 80.0;
+pub(crate) const DEFAULT_GRAVITY_LOGICAL_PX_PER_S2: f64 = 1_800.0;
 const DEFAULT_TURN_DURATION: Duration = Duration::from_millis(250);
 const DEFAULT_INTERACTION_DURATION: Duration = Duration::from_millis(500);
+const DEFAULT_LANDING_DURATION: Duration = Duration::from_millis(250);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum HorizontalDirection {
@@ -65,6 +67,7 @@ pub(crate) enum PetIntent {
     Interact,
     BeginDrag,
     EndDrag,
+    Landed,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -86,6 +89,9 @@ impl TransitionContext {
     };
     pub const EXPLICIT: Self = Self {
         priority: TransitionPriority::Explicit,
+    };
+    pub const PHYSICS: Self = Self {
+        priority: TransitionPriority::Physics,
     };
     pub const DRAG: Self = Self {
         priority: TransitionPriority::Drag,
@@ -155,6 +161,7 @@ pub(crate) struct BehaviorStateMachine {
     facing: HorizontalDirection,
     turn_elapsed: Duration,
     interaction_elapsed: Duration,
+    landing_elapsed: Duration,
     pending_walk: Option<HorizontalDirection>,
 }
 
@@ -165,6 +172,7 @@ impl Default for BehaviorStateMachine {
             facing: HorizontalDirection::Right,
             turn_elapsed: Duration::ZERO,
             interaction_elapsed: Duration::ZERO,
+            landing_elapsed: Duration::ZERO,
             pending_walk: None,
         }
     }
@@ -201,6 +209,7 @@ impl BehaviorStateMachine {
         self.pending_walk = None;
         self.turn_elapsed = Duration::ZERO;
         self.interaction_elapsed = Duration::ZERO;
+        self.landing_elapsed = Duration::ZERO;
     }
 }
 
@@ -254,12 +263,21 @@ impl PetStateMachine for BehaviorStateMachine {
                 if self.state == PetState::Dragged
                     && context.priority >= TransitionPriority::Drag =>
             {
-                self.transition_to(PetState::Idle, None, PetAnimationIntent::Idle)
+                self.landing_elapsed = Duration::ZERO;
+                self.transition_to(PetState::Falling, None, PetAnimationIntent::Idle)
+            }
+            PetIntent::Landed
+                if self.state == PetState::Falling
+                    && context.priority >= TransitionPriority::Physics =>
+            {
+                self.landing_elapsed = Duration::ZERO;
+                self.transition_to(PetState::Landing, None, PetAnimationIntent::Idle)
             }
             PetIntent::Interact
             | PetIntent::LookAt { .. }
             | PetIntent::BeginDrag
-            | PetIntent::EndDrag => {
+            | PetIntent::EndDrag
+            | PetIntent::Landed => {
                 StateTransition::rejected(self.state, TransitionRejection::UnsupportedIntent)
             }
         }
@@ -287,6 +305,14 @@ impl PetStateMachine for BehaviorStateMachine {
                     return StateTransition::unchanged(self.state);
                 }
                 self.interaction_elapsed = Duration::ZERO;
+                self.transition_to(PetState::Idle, None, PetAnimationIntent::Idle)
+            }
+            PetState::Landing => {
+                self.landing_elapsed = self.landing_elapsed.saturating_add(delta);
+                if self.landing_elapsed < DEFAULT_LANDING_DURATION {
+                    return StateTransition::unchanged(self.state);
+                }
+                self.landing_elapsed = Duration::ZERO;
                 self.transition_to(PetState::Idle, None, PetAnimationIntent::Idle)
             }
             _ => StateTransition::unchanged(self.state),
@@ -482,12 +508,72 @@ impl PhysicsBody {
             self.position.y + self.velocity_logical_px_per_s[1] * seconds,
         )
     }
+
+    fn falling_step(self, delta: Duration, ground_y: f64) -> Self {
+        let seconds = delta.as_secs_f64();
+        if self.position.y > ground_y
+            || (self.position.y == ground_y && self.velocity_logical_px_per_s[1] >= 0.0)
+        {
+            return Self {
+                position: DesktopPosition::new(self.position.x, ground_y),
+                velocity_logical_px_per_s: [0.0, 0.0],
+                gravity_logical_px_per_s2: self.gravity_logical_px_per_s2,
+                grounded: true,
+            };
+        }
+        let next_velocity_y =
+            self.velocity_logical_px_per_s[1] + self.gravity_logical_px_per_s2 * seconds;
+        let proposed = DesktopPosition::new(
+            self.position.x + self.velocity_logical_px_per_s[0] * seconds,
+            self.position.y
+                + self.velocity_logical_px_per_s[1] * seconds
+                + 0.5 * self.gravity_logical_px_per_s2 * seconds * seconds,
+        );
+        if proposed.y >= ground_y {
+            let hit_seconds = self.ground_hit_time(ground_y, seconds).unwrap_or(seconds);
+            return Self {
+                position: DesktopPosition::new(
+                    self.position.x + self.velocity_logical_px_per_s[0] * hit_seconds,
+                    ground_y,
+                ),
+                velocity_logical_px_per_s: [0.0, 0.0],
+                gravity_logical_px_per_s2: self.gravity_logical_px_per_s2,
+                grounded: true,
+            };
+        }
+        Self {
+            position: proposed,
+            velocity_logical_px_per_s: [self.velocity_logical_px_per_s[0], next_velocity_y],
+            gravity_logical_px_per_s2: self.gravity_logical_px_per_s2,
+            grounded: false,
+        }
+    }
+
+    fn ground_hit_time(self, ground_y: f64, maximum_seconds: f64) -> Option<f64> {
+        let a = 0.5 * self.gravity_logical_px_per_s2;
+        let b = self.velocity_logical_px_per_s[1];
+        let c = self.position.y - ground_y;
+        if a.abs() <= f64::EPSILON {
+            if b.abs() <= f64::EPSILON {
+                return None;
+            }
+            let time = -c / b;
+            return (time >= 0.0 && time <= maximum_seconds).then_some(time);
+        }
+        let discriminant = b * b - 4.0 * a * c;
+        if discriminant < 0.0 {
+            return None;
+        }
+        let root = (-b + discriminant.sqrt()) / (2.0 * a);
+        (root >= 0.0 && root <= maximum_seconds).then_some(root)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum MovementState {
     Idle,
     Walking(HorizontalDirection),
+    Falling,
 }
 
 pub(crate) struct MovementController {
@@ -530,9 +616,31 @@ impl MovementController {
     }
 
     pub fn finish_drag(&mut self, release_velocity: [f64; 2]) {
-        self.state = MovementState::Idle;
+        self.state = MovementState::Falling;
         self.body.velocity_logical_px_per_s = release_velocity;
+        self.body.gravity_logical_px_per_s2 = DEFAULT_GRAVITY_LOGICAL_PX_PER_S2;
         self.body.grounded = false;
+    }
+
+    pub fn try_advance_falling<E, T>(
+        &mut self,
+        delta: Duration,
+        ground_y: f64,
+        mut apply: impl FnMut(DesktopPosition) -> Result<(DesktopPosition, T), E>,
+    ) -> Result<Option<(T, bool)>, E> {
+        if self.state != MovementState::Falling {
+            return Ok(None);
+        }
+        let next = self.body.falling_step(delta, ground_y);
+        let (confirmed, output) = apply(next.position)?;
+        self.body = PhysicsBody {
+            position: confirmed,
+            ..next
+        };
+        if next.grounded {
+            self.state = MovementState::Idle;
+        }
+        Ok(Some((output, next.grounded)))
     }
 
     fn proposed_position(&self, delta: Duration) -> DesktopPosition {
@@ -693,7 +801,26 @@ mod tests {
         );
         let released = machine.apply(PetIntent::EndDrag, &TransitionContext::DRAG);
         assert_eq!(released.previous, PetState::Dragged);
-        assert_eq!(released.next, PetState::Idle);
+        assert_eq!(released.next, PetState::Falling);
+        assert_eq!(released.animation, Some(PetAnimationIntent::Idle));
+        assert_eq!(
+            machine
+                .apply(PetIntent::StayIdle, &TransitionContext::BRAIN)
+                .outcome,
+            TransitionOutcome::Rejected(TransitionRejection::SuppressedByPriority)
+        );
+        let landed = machine.apply(PetIntent::Landed, &TransitionContext::PHYSICS);
+        assert_eq!(landed.previous, PetState::Falling);
+        assert_eq!(landed.next, PetState::Landing);
+        assert_eq!(
+            machine
+                .fixed_update(Duration::from_millis(249), &TransitionContext::PHYSICS)
+                .outcome,
+            TransitionOutcome::Unchanged
+        );
+        let idle = machine.fixed_update(Duration::from_millis(1), &TransitionContext::PHYSICS);
+        assert_eq!(idle.previous, PetState::Landing);
+        assert_eq!(idle.next, PetState::Idle);
     }
 
     #[test]
@@ -708,7 +835,121 @@ mod tests {
 
         movement.finish_drag([320.0, -180.0]);
         assert_eq!(movement.body().velocity_logical_px_per_s, [320.0, -180.0]);
+        assert_eq!(
+            movement.body().gravity_logical_px_per_s2,
+            DEFAULT_GRAVITY_LOGICAL_PX_PER_S2
+        );
         assert_eq!(movement.body().position, DesktopPosition::new(400.0, -20.0));
+    }
+
+    #[test]
+    fn falling_uses_constant_acceleration_and_preserves_horizontal_velocity() {
+        let mut movement = MovementController::new(DesktopPosition::new(10.0, 20.0));
+        movement.finish_drag([120.0, -300.0]);
+        let advanced = movement
+            .try_advance_falling(Duration::from_millis(100), 500.0, |position| {
+                Ok::<_, ()>((position, position))
+            })
+            .expect("fall step")
+            .expect("falling movement");
+        assert!(!advanced.1);
+        assert_position_close(advanced.0, DesktopPosition::new(22.0, -1.0), 1.0e-9);
+        assert_position_close(movement.position(), advanced.0, 1.0e-9);
+        assert_velocity_close(movement.body().velocity_logical_px_per_s, [120.0, -120.0]);
+        assert!(!movement.body().grounded);
+    }
+
+    #[test]
+    fn falling_clamps_exactly_to_ground_and_stops_once() {
+        let mut movement = MovementController::new(DesktopPosition::new(10.0, 0.0));
+        movement.finish_drag([100.0, 200.0]);
+        let (position, landed) = movement
+            .try_advance_falling(Duration::from_secs(2), 400.0, |position| {
+                Ok::<_, ()>((position, position))
+            })
+            .expect("fall step")
+            .expect("falling movement");
+        assert!(landed);
+        assert!((position.y - 400.0).abs() <= 1.0e-9);
+        assert!(position.x > 10.0 && position.x < 210.0);
+        assert_eq!(movement.body().velocity_logical_px_per_s, [0.0, 0.0]);
+        assert!(movement.body().grounded);
+        assert_eq!(
+            movement
+                .try_advance_falling(Duration::from_secs(1), 400.0, |position| {
+                    Ok::<_, ()>((position, ()))
+                })
+                .expect("idle step"),
+            None
+        );
+    }
+
+    #[test]
+    fn release_below_ground_is_clamped_without_an_extra_fall() {
+        let mut movement = MovementController::new(DesktopPosition::new(-50.0, 420.0));
+        movement.finish_drag([300.0, -800.0]);
+        let (position, landed) = movement
+            .try_advance_falling(Duration::from_millis(16), 400.0, |position| {
+                Ok::<_, ()>((position, position))
+            })
+            .expect("fall step")
+            .expect("falling movement");
+        assert!(landed);
+        assert_eq!(position, DesktopPosition::new(-50.0, 400.0));
+    }
+
+    #[test]
+    fn upward_release_from_ground_rises_before_landing() {
+        let mut movement = MovementController::new(DesktopPosition::new(50.0, 400.0));
+        movement.finish_drag([0.0, -600.0]);
+        let (position, landed) = movement
+            .try_advance_falling(Duration::from_millis(100), 400.0, |position| {
+                Ok::<_, ()>((position, position))
+            })
+            .expect("fall step")
+            .expect("falling movement");
+        assert!(!landed);
+        assert!(position.y < 400.0);
+
+        let mut landed_again = false;
+        for _ in 0..100 {
+            let Some((_, landed)) = movement
+                .try_advance_falling(Duration::from_millis(16), 400.0, |position| {
+                    Ok::<_, ()>((position, ()))
+                })
+                .expect("fall step")
+            else {
+                break;
+            };
+            if landed {
+                landed_again = true;
+                break;
+            }
+        }
+        assert!(landed_again);
+        assert_eq!(movement.position(), DesktopPosition::new(50.0, 400.0));
+    }
+
+    #[test]
+    fn failed_falling_window_move_preserves_body_and_velocity() {
+        let mut movement = MovementController::new(DesktopPosition::new(5.0, 7.0));
+        movement.finish_drag([80.0, -120.0]);
+        let before = movement.body();
+        let error = movement
+            .try_advance_falling(Duration::from_millis(100), 500.0, |_proposed| {
+                Err::<(DesktopPosition, ()), _>("mock failure")
+            })
+            .expect_err("mock platform must reject the move");
+        assert_eq!(error, "mock failure");
+        assert_eq!(movement.body(), before);
+    }
+
+    #[test]
+    fn different_fixed_steps_produce_the_same_ground_position() {
+        let fine = simulate_fall(Duration::from_nanos(1_000_000_000 / 120));
+        let coarse = simulate_fall(Duration::from_nanos(1_000_000_000 / 30));
+        assert_position_close(fine.0, coarse.0, 1.0e-6);
+        assert!((fine.1.as_secs_f64() - coarse.1.as_secs_f64()).abs() < 1.0 / 30.0);
     }
 
     #[test]
@@ -862,6 +1103,33 @@ mod tests {
             machine.fixed_update(Duration::from_millis(100), &TransitionContext::BRAIN);
         }
         decisions
+    }
+
+    fn simulate_fall(delta: Duration) -> (DesktopPosition, Duration) {
+        let mut movement = MovementController::new(DesktopPosition::new(20.0, 40.0));
+        movement.finish_drag([180.0, -450.0]);
+        let mut elapsed = Duration::ZERO;
+        for _ in 0..10_000 {
+            elapsed += delta;
+            let (position, landed) = movement
+                .try_advance_falling(delta, 600.0, |position| Ok::<_, ()>((position, position)))
+                .expect("fall step")
+                .expect("falling movement");
+            if landed {
+                return (position, elapsed);
+            }
+        }
+        panic!("fall did not reach the ground");
+    }
+
+    fn assert_position_close(actual: DesktopPosition, expected: DesktopPosition, epsilon: f64) {
+        assert!((actual.x - expected.x).abs() <= epsilon, "x: {actual:?}");
+        assert!((actual.y - expected.y).abs() <= epsilon, "y: {actual:?}");
+    }
+
+    fn assert_velocity_close(actual: [f64; 2], expected: [f64; 2]) {
+        assert!((actual[0] - expected[0]).abs() <= 1.0e-9, "x: {actual:?}");
+        assert!((actual[1] - expected[1]).abs() <= 1.0e-9, "y: {actual:?}");
     }
 
     #[test]

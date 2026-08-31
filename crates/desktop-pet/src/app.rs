@@ -273,11 +273,17 @@ impl Application {
     }
 
     fn advance_movement(&mut self) -> Result<(), AppError> {
+        let state = self.state_machine.as_ref().map(PetStateMachine::state);
         let direction = self.state_machine.as_ref().map(PetStateMachine::facing);
+        match (state, direction) {
+            (Some(PetState::Walking), Some(direction)) => self.advance_walking(direction),
+            (Some(PetState::Falling), _) => self.advance_falling(),
+            _ => Ok(()),
+        }
+    }
+
+    fn advance_walking(&mut self, direction: HorizontalDirection) -> Result<(), AppError> {
         let Some(movement) = self.movement.as_mut() else {
-            return Ok(());
-        };
-        let Some(direction) = direction else {
             return Ok(());
         };
         let display_manager = self
@@ -316,6 +322,50 @@ impl Application {
                 PetIntent::Turn { direction: turn },
                 TransitionContext::BRAIN,
             );
+        }
+        Ok(())
+    }
+
+    fn advance_falling(&mut self) -> Result<(), AppError> {
+        let window_size = DesktopLogicalSize::new(PET_WINDOW_LOGICAL_SIZE, PET_WINDOW_LOGICAL_SIZE);
+        let movement = self
+            .movement
+            .as_mut()
+            .ok_or_else(|| AppError::Platform("movement controller is unavailable".to_owned()))?;
+        let ground_y = self
+            .display_manager
+            .as_ref()
+            .ok_or_else(|| AppError::Platform("display manager is unavailable".to_owned()))?
+            .ground_y(movement.position(), window_size)
+            .ok_or_else(|| AppError::Platform("no active monitor is available".to_owned()))?;
+        let platform_backend = self
+            .platform_backend
+            .as_mut()
+            .ok_or_else(|| AppError::Platform("platform backend is unavailable".to_owned()))?;
+        let advanced = movement.try_advance_falling(
+            FIXED_UPDATE_INTERVAL,
+            ground_y,
+            |proposed| {
+                platform_backend
+                    .set_window_position(proposed)
+                    .map_err(|error| {
+                        AppError::Platform(format!(
+                            "failed to move the falling window to logical position ({:.3}, {:.3}): {error}",
+                            proposed.x, proposed.y
+                        ))
+                    })?;
+                Ok::<_, AppError>((proposed, proposed))
+            },
+        )?;
+        let Some((position, landed)) = advanced else {
+            return Ok(());
+        };
+        self.mouse_state.update_window_origin(position);
+        self.update_pointer_hit();
+        self.sync_click_through()?;
+        if landed {
+            tracing::info!(?position, ground_y, "pet reached the work-area ground");
+            self.apply_pet_intent(PetIntent::Landed, TransitionContext::PHYSICS);
         }
         Ok(())
     }
@@ -548,6 +598,7 @@ impl Application {
         if let Some(movement) = self.movement.as_mut() {
             match (transition.next, direction) {
                 (PetState::Walking, Some(direction)) => movement.start_walking(direction),
+                (PetState::Falling, _) => {}
                 _ => movement.stop(),
             }
         }
@@ -564,6 +615,8 @@ impl Application {
                     "DesktopPet [Turning Right]"
                 }
                 (PetState::Dragged, _) => "DesktopPet [Dragged]",
+                (PetState::Falling, _) => "DesktopPet [Falling]",
+                (PetState::Landing, _) => "DesktopPet [Landing]",
                 _ => "DesktopPet [Idle]",
             };
             window.set_title(title);
