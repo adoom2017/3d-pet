@@ -20,7 +20,7 @@
 | --- | --- | --- |
 | 0 | 工程基线 | Done |
 | 1 | 透明窗口 | Done |
-| 2 | wgpu 基线 | In Progress |
+| 2 | wgpu 基线 | Verifying |
 | 3 | 静态 GLB | Blocked |
 | 4 | 骨骼与 Idle | Blocked |
 | 5 | Idle / Walk Cross Fade | Blocked |
@@ -146,7 +146,7 @@ evidence/
 
 ## 5. Phase 2：wgpu 基线
 
-**状态：`In Progress`**
+**状态：`Verifying`**
 
 **目标：** 初始化 adapter、device、queue 和透明 surface，以 alpha 0 清屏并绘制可见三角形。
 
@@ -156,11 +156,11 @@ evidence/
 
 **实现任务：**
 
-- [ ] 建立 `Renderer`，拥有 instance、adapter、device、queue、surface 和 pipeline。
-- [ ] 选择受支持的 surface format、present mode 和透明 alpha mode，并记录 adapter 信息。
-- [ ] 使用 `(0, 0, 0, 0)` 清屏，创建最小 WGSL shader 和三角形 pipeline。
-- [ ] 实现非零尺寸 resize、scale-factor change、surface lost/outdated 恢复、timeout 和 out-of-memory 分类。
-- [ ] 增加 adapter/device smoke test 与离屏三角形像素断言；无 adapter 时只允许明确的测试环境 skip 策略。
+- [x] 建立 `Renderer`，拥有 instance、adapter、device、queue、surface 和 pipeline。
+- [x] 选择受支持的 surface format、present mode 和透明 alpha mode，并记录 adapter 信息。
+- [x] 使用 `(0, 0, 0, 0)` 清屏，创建最小 WGSL shader 和三角形 pipeline。
+- [x] 实现非零尺寸 resize、scale-factor change、surface lost/outdated 恢复、timeout 和 out-of-memory 分类。
+- [x] 增加 adapter/device smoke test 与离屏三角形像素断言；无 adapter 时只允许明确的测试环境 skip 策略。
 
 **自动验证命令：** 执行四条全局门禁命令；运行 renderer adapter 和离屏渲染 smoke tests。
 
