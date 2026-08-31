@@ -22,8 +22,8 @@
 | 1 | 透明窗口 | Done |
 | 2 | wgpu 基线 | Done |
 | 3 | 静态 GLB | Done |
-| 4 | 骨骼与 Idle | Verifying |
-| 5 | Idle / Walk Cross Fade | Blocked |
+| 4 | 骨骼与 Idle | Done |
+| 5 | Idle / Walk Cross Fade | Ready |
 | 6 | 桌面移动 | Blocked |
 | 7 | PetBrain | Blocked |
 | 8 | 边界与显示器 | Blocked |
@@ -211,7 +211,7 @@ evidence/
 
 ## 7. Phase 4：骨骼与 Idle
 
-**状态：`Verifying`**
+**状态：`Done`**
 
 **目标：** 实现 skin、joint matrix、动画 channel 采样并稳定循环 Idle。
 
@@ -243,7 +243,7 @@ evidence/
 
 ## 8. Phase 5：Idle / Walk Cross Fade
 
-**状态：`Blocked`**
+**状态：`Ready`**
 
 **目标：** 通过语义动画名称播放 Idle / Walk，支持循环、速度倍率和 250 ms Cross Fade。
 

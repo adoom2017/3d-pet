@@ -1,6 +1,6 @@
 # Phase 4 verification
 
-Status: `Verifying`
+Status: `Done`
 
 Implementation commit: `bdcc12768d95de1601a9213254454a856b5ed9b6`
 
@@ -30,8 +30,18 @@ Deterministic animation tests cover identity bind pose, a single joint, parent/c
 | 2026-08-31 | `bdcc12768d95de1601a9213254454a856b5ed9b6` | `macos-latest` | Pass (44s) | <https://github.com/adoom2017/3d-pet/actions/runs/33358345423> |
 | 2026-08-31 | `bdcc12768d95de1601a9213254454a856b5ed9b6` | `windows-latest` | Pass (1m32s) | <https://github.com/adoom2017/3d-pet/actions/runs/33358345423> |
 
-## Pending macOS acceptance
+## macOS acceptance
 
-The current automated GUI session created a valid LaunchServices process but did not deliver winit's initial `resumed` callback, including with a fresh direct Mach-O application bundle. No animation window was therefore available to capture. The repository keeps the Phase 3 hidden-window startup strategy because it was previously verified on the same Mac; the failed wrapper experiments were removed.
+The repository binary was launched as a direct Mach-O executable in a fresh temporary application bundle. Its 320 x 320 logical window used a 640 x 640 Retina Metal surface and remained alive for approximately 4 minutes 20 seconds while repeatedly playing Idle.
 
-Phase 4 remains `Verifying` until a normal interactive macOS launch is observed for multiple Idle cycles and screenshot or video evidence confirms no exploding joints, collapsed mesh, or visible loop seam. Phase 5 remains `Blocked`.
+Three window-region captures are stored in `screenshots/macos-idle-frame-a.png`, `macos-idle-frame-b.png`, and `macos-idle-frame-c.png`. Visual inspection confirms that the head and ears move subtly while the feet, torso, and tail remain coherent; no joint explosion, collapsed mesh, clipping, material corruption, or visible loop discontinuity appeared. The transparent surroundings continued to reveal the live desktop below the model.
+
+Frames A and B were captured approximately one second apart. Decoded pixel comparison reported:
+
+```text
+size=640x640 changed_pixels=5363 max_channel_delta=220
+```
+
+This proves that the presented Idle pose changed between captures rather than displaying a static bind pose. Frame C was captured after several additional minutes and remained geometrically stable.
+
+The macOS visual gate, local automated gates, and macOS/Windows CI gates passed. Phase 4 is `Done`; Phase 5 is `Ready`.
