@@ -8,7 +8,7 @@ mod input;
 mod interaction;
 mod pet;
 mod platform;
-mod render;
+pub mod render;
 pub mod time;
 
 use anyhow::{Context, Result};

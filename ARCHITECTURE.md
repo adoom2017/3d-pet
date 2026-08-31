@@ -359,7 +359,7 @@ pub struct RenderSnapshot {
 - surface 选择系统支持的透明 alpha mode，clear color 固定为 `(0, 0, 0, 0)`。
 - 材质透明遵循 glTF alpha mode；混合状态必须避免把背景写成不透明黑色。
 - resize 到零尺寸时暂停 acquire / present，恢复非零尺寸后重配 surface。
-- `SurfaceError::Lost` / `Outdated` 触发重配并重试后续帧；timeout 记录节流 warning；out of memory 是致命错误。
+- wgpu 30 的 `CurrentSurfaceTexture::Lost` 触发 surface 重建，`Outdated` 触发重配，`Suboptimal` 在 present 后重配，`Timeout` / `Occluded` 跳过当前帧，`Validation` 是致命错误；device uncaptured-error 回调中的 out of memory 同样是致命错误。
 - joint matrix 上限和 uniform/storage 布局由 adapter limit 校验，超限资源在上传前拒绝。
 - 至少保留无窗口 adapter smoke test 和离屏像素断言；透明桌面合成仍需实机验收。
 

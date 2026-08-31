@@ -16,6 +16,7 @@ Baseline selected on 2026-08-30 for DesktopPet Phase 0.
 | --- | --- | --- | --- |
 | winit | 0.30.13 | Window and event loop foundation for Phase 1 | Stable release, Rust 1.70 MSRV, raw-window-handle 0.6 support |
 | wgpu | 30.0.1 | GPU foundation for Phase 2 | Stable release, Rust 1.87 MSRV, Metal and Direct3D 12 features enabled |
+| pollster | 0.4.0 | Block on one-time async GPU adapter/device initialization | Small executor-free bridge suitable for winit's synchronous lifecycle callback |
 | anyhow | 1.0.104 | Application-boundary error context | Stable 1.x API |
 | thiserror | 2.0.20 | Typed module errors | Stable 2.x derive API |
 | tracing | 0.1.44 | Structured diagnostics | Stable 0.1 API |
@@ -28,6 +29,7 @@ Baseline selected on 2026-08-30 for DesktopPet Phase 0.
 - winit 0.31.0-beta.2 was available but rejected because MVP dependencies must use stable releases.
 - winit enables only raw-window-handle 0.6 support; Linux X11 and Wayland features are intentionally omitted because the MVP targets Windows and macOS.
 - wgpu enables `dx12`, `metal`, `std`, and `wgsl` without unrelated default backends. This matches the Windows/macOS MVP and the planned WGSL shader pipeline.
+- wgpu 30 reports presentation through `CurrentSurfaceTexture`: `Lost` recreates the surface, `Outdated` reconfigures it, `Suboptimal` presents then reconfigures, `Timeout` and `Occluded` skip a frame, and `Validation` is fatal. Out-of-memory is classified through the device uncaptured-error callback because it is no longer a surface acquisition variant.
 - winit and wgpu do not directly depend on each other. Their shared window-handle boundary is raw-window-handle 0.6, which is verified by the resolved dependency graph and dual-platform CI.
 - Exact transitive versions are owned by the committed `Cargo.lock`; direct compatible-version requirements remain in the workspace manifest.
 

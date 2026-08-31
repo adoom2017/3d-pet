@@ -1,5 +1,7 @@
 use thiserror::Error;
 
+use crate::render::RendererError;
+
 #[derive(Debug, Error)]
 pub enum AppError {
     #[error("application configuration is invalid")]
@@ -13,6 +15,9 @@ pub enum AppError {
 
     #[error("platform window operation failed: {0}")]
     Platform(String),
+
+    #[error("renderer failed: {0}")]
+    Renderer(#[from] RendererError),
 }
 
 #[derive(Debug, Error)]

@@ -20,7 +20,7 @@
 | --- | --- | --- |
 | 0 | 工程基线 | Done |
 | 1 | 透明窗口 | Done |
-| 2 | wgpu 基线 | Ready |
+| 2 | wgpu 基线 | In Progress |
 | 3 | 静态 GLB | Blocked |
 | 4 | 骨骼与 Idle | Blocked |
 | 5 | Idle / Walk Cross Fade | Blocked |
@@ -146,7 +146,7 @@ evidence/
 
 ## 5. Phase 2：wgpu 基线
 
-**状态：`Ready`**
+**状态：`In Progress`**
 
 **目标：** 初始化 adapter、device、queue 和透明 surface，以 alpha 0 清屏并绘制可见三角形。
 

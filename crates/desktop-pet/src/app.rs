@@ -13,6 +13,7 @@ use crate::{
     config::AppConfig,
     error::AppError,
     platform::{self, PlatformBackend},
+    render::{RenderOutcome, Renderer},
 };
 
 pub const PET_WINDOW_LOGICAL_SIZE: f64 = 320.0;
@@ -54,7 +55,8 @@ impl WindowSpec {
             .with_transparent(self.transparent)
             .with_decorations(self.decorations)
             .with_resizable(self.resizable)
-            .with_window_level(window_level);
+            .with_window_level(window_level)
+            .with_visible(false);
 
         platform::configure_window_attributes(attributes)
     }
@@ -65,6 +67,10 @@ pub struct Application {
     config: AppConfig,
     window: Option<Arc<Window>>,
     _platform_backend: Option<Box<dyn PlatformBackend>>,
+    renderer: Option<Renderer>,
+    redraw_pending: bool,
+    redraw_request_logged: bool,
+    has_presented_frame: bool,
     fatal_error: Option<AppError>,
 }
 
@@ -75,6 +81,10 @@ impl Application {
             config,
             window: None,
             _platform_backend: None,
+            renderer: None,
+            redraw_pending: false,
+            redraw_request_logged: false,
+            has_presented_frame: false,
             fatal_error: None,
         })
     }
@@ -106,6 +116,7 @@ impl Application {
         platform_backend
             .set_always_on_top(spec.always_on_top)
             .map_err(|error| AppError::Platform(error.to_string()))?;
+        let renderer = pollster::block_on(Renderer::new(Arc::clone(&window)))?;
 
         let physical_size = window.inner_size();
         tracing::info!(
@@ -124,11 +135,18 @@ impl Application {
 
         self.window = Some(window);
         self._platform_backend = Some(platform_backend);
+        self.renderer = Some(renderer);
+        self.redraw_pending = true;
+        self.redraw_request_logged = false;
+        if let Some(window) = self.window.as_ref() {
+            window.set_visible(true);
+        }
+        event_loop.set_control_flow(ControlFlow::Poll);
         Ok(())
     }
 
     fn fail_and_exit(&mut self, event_loop: &ActiveEventLoop, error: AppError) {
-        tracing::error!(error = %error, "fatal window lifecycle error");
+        tracing::error!(error = %error, "fatal application lifecycle error");
         self.fatal_error = Some(error);
         event_loop.exit();
     }
@@ -164,6 +182,7 @@ impl ApplicationHandler for Application {
             }
             WindowEvent::Destroyed => {
                 tracing::debug!(?window_id, "window destroyed");
+                self.renderer = None;
                 self.window = None;
             }
             WindowEvent::Resized(size) => {
@@ -174,9 +193,56 @@ impl ApplicationHandler for Application {
                     zero_sized = size.width == 0 || size.height == 0,
                     "window resized"
                 );
+                if let Some(renderer) = self.renderer.as_mut() {
+                    renderer.resize(size);
+                }
+                self.redraw_pending = size.width > 0 && size.height > 0;
+                event_loop.set_control_flow(if self.redraw_pending {
+                    ControlFlow::Poll
+                } else {
+                    ControlFlow::Wait
+                });
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
                 tracing::debug!(?window_id, scale_factor, "window scale factor changed");
+                if let (Some(renderer), Some(window)) =
+                    (self.renderer.as_mut(), self.window.as_ref())
+                {
+                    renderer.resize(window.inner_size());
+                }
+                self.redraw_pending = true;
+                event_loop.set_control_flow(ControlFlow::Poll);
+            }
+            WindowEvent::RedrawRequested => {
+                tracing::debug!(?window_id, "processing pending wgpu redraw");
+                let Some(renderer) = self.renderer.as_mut() else {
+                    return;
+                };
+                let result = renderer.render();
+                match result {
+                    Ok(RenderOutcome::Presented) => {
+                        self.redraw_pending = false;
+                        event_loop.set_control_flow(ControlFlow::Wait);
+                        if self.has_presented_frame {
+                            tracing::debug!(?window_id, "wgpu frame presented");
+                        } else {
+                            self.has_presented_frame = true;
+                            tracing::info!(?window_id, "first wgpu frame presented");
+                        }
+                    }
+                    Ok(RenderOutcome::SkippedOccluded) => {
+                        self.redraw_pending = false;
+                        event_loop.set_control_flow(ControlFlow::Wait);
+                    }
+                    Ok(RenderOutcome::Reconfigured | RenderOutcome::SkippedTimeout) => {
+                        self.redraw_pending = true;
+                        event_loop.set_control_flow(ControlFlow::Poll);
+                        if let Some(window) = self.window.as_ref() {
+                            window.request_redraw();
+                        }
+                    }
+                    Err(error) => self.fail_and_exit(event_loop, error.into()),
+                }
             }
             WindowEvent::KeyboardInput { event, .. }
                 if event.state == ElementState::Pressed
@@ -186,6 +252,18 @@ impl ApplicationHandler for Application {
                 event_loop.exit();
             }
             _ => {}
+        }
+    }
+
+    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        if self.redraw_pending
+            && let Some(window) = self.window.as_ref()
+        {
+            if !self.redraw_request_logged {
+                tracing::info!(window_id = ?window.id(), "requesting pending wgpu redraw");
+                self.redraw_request_logged = true;
+            }
+            window.request_redraw();
         }
     }
 
@@ -228,6 +306,7 @@ mod tests {
         assert!(attributes.transparent);
         assert!(!attributes.decorations);
         assert!(!attributes.resizable);
+        assert!(!attributes.visible);
         assert_eq!(attributes.window_level, WindowLevel::AlwaysOnTop);
     }
 
