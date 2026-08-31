@@ -1,8 +1,8 @@
 # Phase 5 verification
 
-Status: `Verifying`
+Status: `Done`
 
-Implementation commit: pending
+Implementation commit: `aa171afc4d4cacd87fcfb74aff0b981594f8524e`
 
 ## Implemented scope
 
@@ -24,7 +24,12 @@ Deterministic animation coverage includes exact 0 ms, 125 ms, and 250 ms blend p
 
 ## CI acceptance
 
-Pending the implementation push. Windows acceptance for this phase is limited to CI format, Clippy, tests, and build; Windows runtime verification is not required.
+| Date | Commit | Platform | Result | Evidence |
+| --- | --- | --- | --- | --- |
+| 2026-08-31 | `aa171afc4d4cacd87fcfb74aff0b981594f8524e` | `macos-latest` | Pass (41s) | <https://github.com/adoom2017/3d-pet/actions/runs/33361469901> |
+| 2026-08-31 | `aa171afc4d4cacd87fcfb74aff0b981594f8524e` | `windows-latest` | Pass (1m03s) | <https://github.com/adoom2017/3d-pet/actions/runs/33361469901> |
+
+Windows acceptance for this phase is limited to CI format, Clippy, tests, and build; Windows runtime verification is not required.
 
 ## macOS acceptance
 
@@ -38,4 +43,4 @@ Evidence captures:
 - `screenshots/macos-walk-after-transition.png`
 - `screenshots/macos-idle-after-repeated-transitions.png`
 
-The macOS visual gate passed. Phase 5 remains `Verifying` until the local gates and macOS/Windows CI jobs pass.
+The macOS visual gate, local automated gates, and macOS/Windows CI gates passed. Phase 5 is `Done`; Phase 6 is `Ready`.

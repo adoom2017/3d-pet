@@ -23,8 +23,8 @@
 | 2 | wgpu 基线 | Done |
 | 3 | 静态 GLB | Done |
 | 4 | 骨骼与 Idle | Done |
-| 5 | Idle / Walk Cross Fade | Verifying |
-| 6 | 桌面移动 | Blocked |
+| 5 | Idle / Walk Cross Fade | Done |
+| 6 | 桌面移动 | Ready |
 | 7 | PetBrain | Blocked |
 | 8 | 边界与显示器 | Blocked |
 | 9 | 命中测试 | Blocked |
@@ -243,7 +243,7 @@ evidence/
 
 ## 8. Phase 5：Idle / Walk Cross Fade
 
-**状态：`Verifying`**
+**状态：`Done`**
 
 **目标：** 通过语义动画名称播放 Idle / Walk，支持循环、速度倍率和 250 ms Cross Fade。
 
@@ -275,7 +275,7 @@ evidence/
 
 ## 9. Phase 6：桌面移动
 
-**状态：`Blocked`**
+**状态：`Ready`**
 
 **目标：** 以桌面逻辑坐标驱动窗口水平移动，同时播放 Walk，行为速度不依赖渲染 FPS。
 
