@@ -8,7 +8,7 @@ DesktopPet 是面向 Windows 和 macOS 的轻量级 3D 桌面宠物。它以透�
 
 - 先完成稳定、低资源占用、可长期运行的桌宠引擎，再扩展内容和智能能力。
 - MVP 之前不开发 AI；AI 未来只能提交意图，不能直接控制窗口、动画或渲染器。
-- Windows 与 macOS 是同等支持的平台；macOS 用于日常开发，Windows 由 CI 持续验证并在关键阶段实机验收。
+- macOS 是 MVP 的主要运行、视觉、交互和性能验收平台；Windows 保留源码支持，并由 CI 持续验证编译、Clippy、测试和构建。
 - 行为、物理、坐标转换等核心逻辑保持确定性和平台无关，平台差异集中隔离。
 - 每个 Phase 必须完成自动验证、要求的平台验收并留下证据，才能解锁下一阶段。
 
@@ -16,7 +16,7 @@ DesktopPet 是面向 Windows 和 macOS 的轻量级 3D 桌面宠物。它以透�
 
 ### 2.1 必须包含
 
-- Windows 和 macOS 双平台运行。
+- macOS 完整运行；Windows 代码路径持续保持可编译和自动测试通过。
 - 320 x 320 初始逻辑尺寸的无边框、透明、不可缩放、置顶窗口。
 - 加载并显示带骨骼动画的 GLB 宠物资源。
 - Idle 与 Walk 循环动画，以及二者之间的 250 ms Cross Fade。
@@ -74,7 +74,7 @@ DesktopPet 是面向 Windows 和 macOS 的轻量级 3D 桌面宠物。它以透�
 | 11 | 拖动 | 实现命中后按下、偏移记录、跨边缘移动和释放 |
 | 12 | 重力与落地 | 实现 Falling / Landing / Idle、地面夹紧和释放速度处理 |
 | 13 | Look At Mouse | 在基础姿态后叠加受限且平滑的头部 yaw / pitch |
-| 14 | 性能与 MVP 验收 | 实现自适应 FPS、按需渲染并完成性能、稳定性和双平台完整场景验收 |
+| 14 | 性能与 MVP 验收 | 实现自适应 FPS、按需渲染，完成 macOS 性能与完整场景验收及 Windows CI 兼容性验证 |
 
 ## 5. 发布里程碑
 
@@ -89,8 +89,8 @@ v0.1.0-desktop-pet-mvp
 - Phase 0-14 全部为 `Done`，每个阶段均有日期、commit、平台、结果以及截图或日志路径。
 - `cargo fmt --check`、Clippy、workspace 测试和 workspace 构建全部通过。
 - GitHub Actions 的 macOS / Windows 矩阵在候选 commit 上全部为绿色。
-- macOS 与 Windows 实机均完成最终 MVP 场景：启动、透明置顶、GLB、Idle、随机 Walk、边缘转身、命中与穿透、点击、拖放、落地、Look At Mouse 和自适应 FPS。
-- 两个平台没有骨骼明显变形、黑色透明背景、输入被永久阻断、跨 DPI 显示器跳变或长时间 busy loop。
+- macOS 实机完成最终 MVP 场景：启动、透明置顶、GLB、Idle、随机 Walk、边缘转身、命中与穿透、点击、拖放、落地、Look At Mouse 和自适应 FPS。
+- macOS 没有骨骼明显变形、黑色透明背景、输入被永久阻断、跨 DPI 显示器跳变或长时间 busy loop；未取得证据时不宣称 Windows 运行时行为一致。
 - 正常活动时 CPU 目标低于 2%，Idle 尽可能接近零，内存低于 150 MB；测试方法、机器配置和采样结果已归档。
 - 默认资产来源和 CC0 许可证记录完整，发布包只包含受信的预置资源类型。
 

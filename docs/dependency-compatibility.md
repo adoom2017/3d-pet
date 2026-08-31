@@ -34,7 +34,7 @@ Baseline selected on 2026-08-30 for DesktopPet Phase 0.
 ## Known platform limits
 
 - Headless CI proves compilation and pure logic, not transparent desktop composition or native input behavior.
-- Phase 1, 2, 4, 10, and 14 retain Windows real-machine gates.
+- Since 2026-08-31, macOS owns runtime, visual, interaction, and performance acceptance. Windows must pass compilation, Clippy, tests, and build in CI; no Windows real-machine gate is required.
 - Platform-native dependencies for windows-rs and objc2 are deferred until their first implementation phase so Phase 0 does not lock unused native APIs.
 
 Update this file whenever a direct dependency line, Rust MSRV, backend feature, or known platform limitation changes.

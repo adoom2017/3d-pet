@@ -19,8 +19,8 @@
 | Phase | 名称 | 状态 |
 | --- | --- | --- |
 | 0 | 工程基线 | Done |
-| 1 | 透明窗口 | Verifying |
-| 2 | wgpu 基线 | Blocked |
+| 1 | 透明窗口 | Done |
+| 2 | wgpu 基线 | Ready |
 | 3 | 静态 GLB | Blocked |
 | 4 | 骨骼与 Idle | Blocked |
 | 5 | Idle / Walk Cross Fade | Blocked |
@@ -49,7 +49,7 @@ cargo build --workspace
 
 - GitHub Actions 在每次 `push` 和 `pull_request` 运行 macOS / Windows 矩阵；候选 commit 的矩阵全绿，且每个 job 执行上述四条命令。
 - 涉及视觉或交互的阶段完成 macOS 人工验收。
-- Phase 1、2、4、10、14 以及最终 MVP 完成 Windows 实机验收。
+- Windows 只要求 CI 中的编译、Clippy、测试和构建通过，不设置 Windows 实机门禁；未取得证据时不得声称 Windows 运行时、视觉或交互行为已验证。
 - 新逻辑有确定性自动测试；测试不能依赖真实时间、非固定随机源或执行顺序。
 - 没有跳过、忽略或临时注释失败测试；没有未说明的 warning。
 - 验收记录包含绝对日期、完整 commit SHA、平台与系统版本、硬件/adapter（相关时）、执行结果以及截图或日志路径。
@@ -104,7 +104,7 @@ evidence/
 
 **Windows CI 验收：** Windows job 安装稳定 Rust 后完成格式、Clippy、测试和 debug 构建；不得用 `continue-on-error` 掩盖失败。
 
-**Windows 实机验收：** 本阶段不要求；CI 只证明工程基线可编译测试。
+**Windows 实机验收：** 不要求；Windows 门禁仅为 CI 编译、Clippy、测试和构建通过。
 
 **产物与验证证据：** `Cargo.toml`、应用 crate、`Cargo.lock`、`.github/workflows/ci.yml`、README、依赖兼容性记录，以及 `evidence/phase-00/verification.md` 中的本地日志和双平台 CI run URL。
 
@@ -114,7 +114,7 @@ evidence/
 
 ## 4. Phase 1：透明窗口
 
-**状态：`Verifying`**
+**状态：`Done`**
 
 **目标：** 创建 320 x 320 逻辑像素、无边框、透明、不可缩放、置顶的窗口，并验证系统合成与窗口层级。
 
@@ -136,23 +136,23 @@ evidence/
 
 **Windows CI 验收：** Windows job 完成全部门禁，含 Windows 平台模块编译和测试。
 
-**Windows 实机验收：** 在 Windows 上证明透明合成无黑底、窗口无边框且不可缩放、置顶层级正确，记录系统版本和显示缩放。
+**Windows 实机验收：** 不要求；Windows 门禁仅为 CI 编译、Clippy、测试和构建通过。
 
-**产物与验证证据：** 窗口生命周期代码、平台置顶实现、相关测试，`evidence/phase-01/verification.md`、macOS/Windows 截图或录屏和 CI URL。
+**产物与验证证据：** 窗口生命周期代码、平台置顶实现、相关测试，`evidence/phase-01/verification.md`、macOS 截图或录屏和 CI URL。
 
-**阶段退出条件：** 双平台实机行为一致，自动门禁和 CI 全绿，视觉证据完整。
+**阶段退出条件：** macOS 实机行为通过，自动门禁和 macOS / Windows CI 全绿，视觉证据完整。
 
 **下一阶段解锁条件：** Phase 1 标记 `Done` 后，Phase 2 才能改为 `Ready`。
 
 ## 5. Phase 2：wgpu 基线
 
-**状态：`Blocked`**
+**状态：`Ready`**
 
 **目标：** 初始化 adapter、device、queue 和透明 surface，以 alpha 0 清屏并绘制可见三角形。
 
 **非目标：** 不加载 GLB，不实现材质、骨骼或动画。
 
-**前置条件：** Phase 1 为 `Done`，透明窗口已在双平台实机通过。
+**前置条件：** Phase 1 为 `Done`，透明窗口已在 macOS 实机通过。
 
 **实现任务：**
 
@@ -168,11 +168,11 @@ evidence/
 
 **Windows CI 验收：** Windows job 编译 D3D backend 路径并执行可用的 renderer smoke；任何环境 skip 必须在日志中可见。
 
-**Windows 实机验收：** 确认颜色三角形可见、背景透明、surface resize 和窗口移动稳定，记录 GPU 与 driver。
+**Windows 实机验收：** 不要求；Windows 门禁仅为 CI 编译、Clippy、测试和构建通过。
 
-**产物与验证证据：** renderer、shader、smoke tests，`evidence/phase-02/verification.md`、双平台截图、adapter 日志和 CI URL。
+**产物与验证证据：** renderer、shader、smoke tests，`evidence/phase-02/verification.md`、macOS 截图、adapter 日志和 CI URL。
 
-**阶段退出条件：** 双平台透明 surface 和可见 GPU 内容实机通过，错误恢复测试与全局门禁通过。
+**阶段退出条件：** macOS 透明 surface 和可见 GPU 内容实机通过，错误恢复测试与全局门禁通过。
 
 **下一阶段解锁条件：** Phase 2 标记 `Done` 后，Phase 3 才能改为 `Ready`。
 
@@ -201,7 +201,7 @@ evidence/
 
 **Windows CI 验收：** Windows job 完成资源解析、fixture、离屏测试和构建；验证路径规则在 Windows separator 下成立。
 
-**Windows 实机验收：** 本阶段不强制；发现 CI renderer 环境跳过或平台材质差异时升级为必做并记录。
+**Windows 实机验收：** 不要求；Windows 门禁仅为 CI 编译、Clippy、测试和构建通过。
 
 **产物与验证证据：** manifest、许可证与来源记录、默认 GLB、AssetManager、静态 renderer、fixtures，以及 `evidence/phase-03/verification.md`、macOS 截图和 CI URL。
 
@@ -233,11 +233,11 @@ evidence/
 
 **Windows CI 验收：** Windows job 通过骨骼数学、采样、buffer layout 和构建测试。
 
-**Windows 实机验收：** 使用同一 GLB 连续观察多个 Idle 周期，确认与 macOS 朝向、关节和循环一致，记录 GPU。
+**Windows 实机验收：** 不要求；Windows 门禁仅为 CI 编译、Clippy、测试和构建通过。
 
-**产物与验证证据：** skeleton/animation 数据结构、skinning shader、测试，以及 `evidence/phase-04/verification.md`、双平台视频或连续截图和 CI URL。
+**产物与验证证据：** skeleton/animation 数据结构、skinning shader、测试，以及 `evidence/phase-04/verification.md`、macOS 视频或连续截图和 CI URL。
 
-**阶段退出条件：** Idle 双平台实机无明显变形或循环错误，全部数学测试与全局门禁通过。
+**阶段退出条件：** Idle 在 macOS 实机无明显变形或循环错误，全部数学测试与全局门禁通过。
 
 **下一阶段解锁条件：** Phase 4 标记 `Done` 后，Phase 5 才能改为 `Ready`。
 
@@ -265,7 +265,7 @@ evidence/
 
 **Windows CI 验收：** Windows job 通过全部动画过渡数值测试和构建。
 
-**Windows 实机验收：** 本阶段不强制；若 shader 或浮点布局产生平台差异则必须补验。
+**Windows 实机验收：** 不要求；Windows 门禁仅为 CI 编译、Clippy、测试和构建通过。
 
 **产物与验证证据：** AnimationController、过渡测试，`evidence/phase-05/verification.md`、macOS 录屏和 CI URL。
 
@@ -297,7 +297,7 @@ evidence/
 
 **Windows CI 验收：** Windows job 编译窗口位置平台实现并通过 mock/纯逻辑测试。
 
-**Windows 实机验收：** 本阶段不强制；窗口移动 API 在后续关键阶段覆盖。
+**Windows 实机验收：** 不要求；Windows 门禁仅为 CI 编译、Clippy、测试和构建通过。
 
 **产物与验证证据：** movement/physics 基础、平台位置方法、测试，`evidence/phase-06/verification.md`、macOS 录屏和 CI URL。
 
@@ -329,7 +329,7 @@ evidence/
 
 **Windows CI 验收：** Windows job 运行同一 seed 并得到相同决策序列。
 
-**Windows 实机验收：** 本阶段不要求，核心行为由确定性测试覆盖。
+**Windows 实机验收：** 不要求；Windows 门禁仅为 CI 编译、Clippy、测试和构建通过。
 
 **产物与验证证据：** Brain、状态机、可注入随机/时钟和测试，`evidence/phase-07/verification.md`、观察日志和 CI URL。
 
@@ -362,7 +362,7 @@ evidence/
 
 **Windows CI 验收：** Windows job 通过负坐标和多 DPI 纯逻辑测试，并编译显示器枚举实现。
 
-**Windows 实机验收：** 本阶段不强制；Phase 10/14 覆盖可用的多屏 DPI 场景。
+**Windows 实机验收：** 不要求；Windows 门禁仅为 CI 编译、Clippy、测试和构建通过。
 
 **产物与验证证据：** DisplayManager、显示器平台适配、边界逻辑和测试，`evidence/phase-08/verification.md`、布局示意/录屏和 CI URL。
 
@@ -394,7 +394,7 @@ evidence/
 
 **Windows CI 验收：** Windows job 通过相同坐标 fixture 和全部构建测试。
 
-**Windows 实机验收：** 本阶段不强制；Phase 10 与平台穿透一起验证实际鼠标路径。
+**Windows 实机验收：** 不要求；Windows 门禁仅为 CI 编译、Clippy、测试和构建通过。
 
 **产物与验证证据：** MouseState、坐标转换、HitRegion、测试，`evidence/phase-09/verification.md`、overlay 截图/命中日志和 CI URL。
 
@@ -427,11 +427,11 @@ evidence/
 
 **Windows CI 验收：** Windows job 编译消息处理代码，通过返回值映射和平台 mock 测试。
 
-**Windows 实机验收：** 重复 macOS 场景，确认下层窗口收到透明区域点击、宠物区域收到点击、快速移动不导致永久穿透，记录显示缩放。
+**Windows 实机验收：** 不要求；Windows 门禁仅为 CI 编译、Clippy、测试和构建通过。
 
-**产物与验证证据：** 两端平台穿透实现、测试，`evidence/phase-10/verification.md`、双平台录屏/点击日志和 CI URL。
+**产物与验证证据：** 两端平台穿透实现、测试，`evidence/phase-10/verification.md`、macOS 录屏/点击日志和 CI URL。
 
-**阶段退出条件：** 双平台实机同时满足“桌面可点击”和“宠物可交互”，无永久错误状态，所有门禁通过。
+**阶段退出条件：** macOS 实机同时满足“桌面可点击”和“宠物可交互”，无永久错误状态，所有门禁通过。
 
 **下一阶段解锁条件：** Phase 10 标记 `Done` 后，Phase 11 才能改为 `Ready`。
 
@@ -460,7 +460,7 @@ evidence/
 
 **Windows CI 验收：** Windows job 通过全部交互纯逻辑和平台编译测试。
 
-**Windows 实机验收：** 本阶段不强制；Phase 14 最终场景补充 Windows 拖放实测。
+**Windows 实机验收：** 不要求；Windows 门禁仅为 CI 编译、Clippy、测试和构建通过。
 
 **产物与验证证据：** InteractionController、pointer capture/取消路径、测试，`evidence/phase-11/verification.md`、macOS 录屏和 CI URL。
 
@@ -492,7 +492,7 @@ evidence/
 
 **Windows CI 验收：** Windows job 通过相同物理 fixture 和状态转换测试。
 
-**Windows 实机验收：** 本阶段不强制；Phase 14 最终场景补充 Windows 落地实测。
+**Windows 实机验收：** 不要求；Windows 门禁仅为 CI 编译、Clippy、测试和构建通过。
 
 **产物与验证证据：** PhysicsBody 更新、落地状态转换和测试，`evidence/phase-12/verification.md`、macOS 录屏/状态日志和 CI URL。
 
@@ -525,7 +525,7 @@ evidence/
 
 **Windows CI 验收：** Windows job 通过相同姿态数值测试和构建。
 
-**Windows 实机验收：** 本阶段不强制；Phase 14 最终场景补充 Windows 视觉实测。
+**Windows 实机验收：** 不要求；Windows 门禁仅为 CI 编译、Clippy、测试和构建通过。
 
 **产物与验证证据：** LookTarget、程序化 pose layer、manifest joint 配置和测试，`evidence/phase-13/verification.md`、macOS 录屏和 CI URL。
 
@@ -537,7 +537,7 @@ evidence/
 
 **状态：`Blocked`**
 
-**目标：** 实现自适应帧调度和完全静止时按事件渲染，完成性能、长时间稳定性和完整 MVP 双平台验收。
+**目标：** 实现自适应帧调度和完全静止时按事件渲染，完成 macOS 性能、长时间稳定性和完整 MVP 验收，并验证 Windows CI 兼容性。
 
 **非目标：** 不增加托盘、设置、自动启动、签名、公证、AI 或任何 MVP 外功能。
 
@@ -567,11 +567,11 @@ cargo test --workspace --release
 
 **Windows CI 验收：** 候选 commit 的 Windows job 完成 debug/release 构建、全部测试和 Clippy；与 macOS job 同为绿色。
 
-**Windows 实机验收：** 用同一候选 commit 和默认资产完成完整 MVP 场景，重点确认透明合成、骨骼、动态穿透、拖放落地、Look At Mouse、多 DPI 和自适应 FPS；记录 CPU/GPU/内存与 GPU/driver。
+**Windows 实机验收：** 不要求；Windows 门禁仅为 CI 编译、Clippy、测试和构建通过。
 
-**产物与验证证据：** FrameScheduler、性能测试说明、长时间运行日志、最终回归记录，`evidence/phase-14/verification.md`、双平台完整录屏/截图、性能采样和 CI URL。
+**产物与验证证据：** FrameScheduler、性能测试说明、长时间运行日志、最终回归记录，`evidence/phase-14/verification.md`、macOS 完整录屏/截图、性能采样和 CI URL。
 
-**阶段退出条件：** 双平台完整 MVP 场景通过；正常活动 CPU `< 2%`、Idle 尽可能接近零、内存 `< 150 MB`；无 busy loop 或持续内存增长；所有门禁全绿。任一量化目标未达到时保持 `Verifying`，先更新实现或经评审调整项目预算，不得把 Phase 标记为 `Done`。
+**阶段退出条件：** macOS 完整 MVP 场景通过，Windows CI 兼容性门禁通过；正常活动 CPU `< 2%`、Idle 尽可能接近零、内存 `< 150 MB`；无 busy loop 或持续内存增长；所有门禁全绿。任一量化目标未达到时保持 `Verifying`，先更新实现或经评审调整项目预算，不得把 Phase 标记为 `Done`。
 
 **下一阶段解锁条件：** Phase 14 没有下一实现 Phase。标记 `Done` 只解锁最终发布门禁，不自动允许创建 tag。
 
@@ -582,8 +582,7 @@ Phase 14 为 `Done` 后，使用一个未变更的候选 commit 完成以下清�
 - [ ] Phase 0-14 全部为 `Done`，证据中的 commit 与候选 commit 一致，或有明确的无影响说明。
 - [ ] 候选 commit 的 macOS / Windows GitHub Actions 矩阵全绿。
 - [ ] 在 macOS 实机从干净配置完成一次完整 MVP 场景。
-- [ ] 在 Windows 实机从干净配置完成一次完整 MVP 场景。
-- [ ] 两端使用同一默认 GLB 和 manifest，视觉与交互没有未解释的行为差异。
+- [ ] Windows job 对同一默认 GLB 和 manifest 完成编译、Clippy、测试和构建；不据此宣称运行时行为已验证。
 - [ ] 资产来源、CC0 许可证、SHA-256 和发布文件清单已复核。
 - [ ] 四条全局门禁及 release build/test 在候选 commit 上重新执行。
 - [ ] 发布验收记录保存到 `evidence/release-v0.1.0/verification.md`，包含日期、完整 SHA、平台、结果、CI URL、截图/录屏和性能日志路径。

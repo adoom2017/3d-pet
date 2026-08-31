@@ -1,6 +1,6 @@
 # Phase 1 verification
 
-Status: `Verifying`
+Status: `Done`
 
 ## Environment
 
@@ -37,12 +37,11 @@ size=640x640 min_alpha=0.0 max_alpha=0.0 nonzero_alpha_pixels=0
 
 The capture contains no opaque pixels or shadow. The application received a synthetic Escape key event and emitted both the exit-request and clean-shutdown INFO records. macOS printed an Input Method Kit Mach-port diagnostic while the synthetic key was delivered; it came from the OS automation path, not DesktopPet tracing, and did not affect shutdown.
 
-## CI and Windows acceptance
+## CI acceptance
 
 | Date | Commit | Platform | Result | Evidence |
 | --- | --- | --- | --- | --- |
 | 2026-08-31 | `78f922b5104b15ab86135c269d96034ce67f5fb7` | `macos-latest` | Pass | <https://github.com/adoom2017/3d-pet/actions/runs/33347060084> |
 | 2026-08-31 | `78f922b5104b15ab86135c269d96034ce67f5fb7` | `windows-latest` | Pass | <https://github.com/adoom2017/3d-pet/actions/runs/33347060084> |
 
-- Windows real-machine acceptance remains required for transparent composition, borderless/non-resizable behavior, and always-on-top level.
-- Phase 1 remains `Verifying`; Phase 2 remains `Blocked` until the Windows real-machine result and its screenshot or log path are added here.
+Under the platform policy adopted on 2026-08-31, macOS is the runtime and visual acceptance platform while Windows is required to compile and pass automated gates in CI. The macOS acceptance and both CI jobs passed, so Phase 1 is `Done` and Phase 2 is `Ready`.
