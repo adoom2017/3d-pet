@@ -14,9 +14,10 @@ use crate::{
     asset::{AssetManager, default_asset_root, default_manifest_path},
     config::AppConfig,
     error::AppError,
+    pet::{HorizontalDirection, MovementController, MovementState},
     platform::{self, PlatformBackend},
     render::{RenderOutcome, Renderer},
-    time::FIXED_UPDATE_INTERVAL,
+    time::{FIXED_UPDATE_INTERVAL, FixedStepAccumulator},
 };
 
 pub const PET_WINDOW_LOGICAL_SIZE: f64 = 320.0;
@@ -69,11 +70,13 @@ impl WindowSpec {
 pub struct Application {
     config: AppConfig,
     window: Option<Arc<Window>>,
-    _platform_backend: Option<Box<dyn PlatformBackend>>,
+    platform_backend: Option<Box<dyn PlatformBackend>>,
     renderer: Option<Renderer>,
     _asset_manager: Option<AssetManager>,
     animation: Option<AnimationController>,
-    next_animation_frame: Option<Instant>,
+    movement: Option<MovementController>,
+    last_logic_update: Option<Instant>,
+    fixed_steps: FixedStepAccumulator,
     redraw_pending: bool,
     redraw_request_logged: bool,
     has_presented_frame: bool,
@@ -86,11 +89,13 @@ impl Application {
         Ok(Self {
             config,
             window: None,
-            _platform_backend: None,
+            platform_backend: None,
             renderer: None,
             _asset_manager: None,
             animation: None,
-            next_animation_frame: None,
+            movement: None,
+            last_logic_update: None,
+            fixed_steps: FixedStepAccumulator::default(),
             redraw_pending: false,
             redraw_request_logged: false,
             has_presented_frame: false,
@@ -127,6 +132,9 @@ impl Application {
         platform_backend
             .set_always_on_top(spec.always_on_top)
             .map_err(|error| AppError::Platform(error.to_string()))?;
+        let initial_position = platform_backend
+            .window_position()
+            .map_err(|error| AppError::Platform(error.to_string()))?;
         let mut renderer = pollster::block_on(Renderer::new(Arc::clone(&window)))?;
         let mut asset_manager = AssetManager::new(default_asset_root())?;
         let pet_handle = asset_manager.load_pet(&default_manifest_path())?;
@@ -158,11 +166,13 @@ impl Application {
         );
 
         self.window = Some(window);
-        self._platform_backend = Some(platform_backend);
+        self.platform_backend = Some(platform_backend);
         self.renderer = Some(renderer);
         self._asset_manager = Some(asset_manager);
         self.animation = Some(animation);
-        self.next_animation_frame = Some(Instant::now() + FIXED_UPDATE_INTERVAL);
+        self.movement = Some(MovementController::new(initial_position));
+        self.fixed_steps = FixedStepAccumulator::default();
+        self.last_logic_update = Some(Instant::now());
         self.redraw_pending = true;
         self.redraw_request_logged = false;
         if let Some(window) = self.window.as_ref() {
@@ -178,6 +188,106 @@ impl Application {
         event_loop.exit();
     }
 
+    fn advance_movement(&mut self) -> Result<(), AppError> {
+        let Some(movement) = self.movement.as_mut() else {
+            return Ok(());
+        };
+        if !matches!(movement.state(), MovementState::Walking(_)) {
+            return Ok(());
+        }
+        let platform_backend = self
+            .platform_backend
+            .as_mut()
+            .ok_or_else(|| AppError::Platform("platform backend is unavailable".to_owned()))?;
+        movement.try_advance(FIXED_UPDATE_INTERVAL, |next| {
+            platform_backend.set_window_position(next).map_err(|error| {
+                AppError::Platform(format!(
+                    "failed to move the window to logical position ({:.3}, {:.3}): {error}",
+                    next.x, next.y
+                ))
+            })
+        })?;
+        Ok(())
+    }
+
+    fn apply_movement_command(&mut self, key: KeyCode) {
+        let Some(movement) = self.movement.as_mut() else {
+            return;
+        };
+        let direction = match key {
+            KeyCode::ArrowLeft => Some(HorizontalDirection::Left),
+            KeyCode::ArrowRight => Some(HorizontalDirection::Right),
+            KeyCode::Space => match movement.state() {
+                MovementState::Idle => Some(HorizontalDirection::Right),
+                MovementState::Walking(_) => None,
+            },
+            _ => return,
+        };
+        match direction {
+            Some(direction) => movement.start_walking(direction),
+            None => movement.stop(),
+        }
+
+        let request = match movement.state() {
+            MovementState::Idle => AnimationRequest::Idle,
+            MovementState::Walking(direction) => {
+                if let Some(renderer) = self.renderer.as_mut() {
+                    renderer.set_pet_facing(direction);
+                }
+                AnimationRequest::Walk
+            }
+        };
+        if let Some(animation) = self.animation.as_mut() {
+            animation.request(request);
+        }
+        tracing::info!(?request, ?direction, "movement command applied");
+        if let Some(window) = self.window.as_ref() {
+            window.set_title(match request {
+                AnimationRequest::Idle => "DesktopPet [Idle]",
+                AnimationRequest::Walk => "DesktopPet [Walking]",
+            });
+            window.request_redraw();
+        }
+        self.redraw_pending = true;
+    }
+
+    fn run_fixed_updates(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        now: Instant,
+    ) -> Result<(), AppError> {
+        let Some(previous) = self.last_logic_update.replace(now) else {
+            return Ok(());
+        };
+        let batch = self
+            .fixed_steps
+            .push(now.saturating_duration_since(previous));
+        if !batch.dropped_time.is_zero() {
+            tracing::warn!(
+                dropped_ms = batch.dropped_time.as_secs_f64() * 1_000.0,
+                "fixed update backlog was dropped"
+            );
+        }
+        for _ in 0..batch.steps {
+            if let Some(animation) = self.animation.as_mut() {
+                animation
+                    .advance(FIXED_UPDATE_INTERVAL)
+                    .map_err(|error| AppError::Animation(error.to_string()))?;
+            }
+            self.advance_movement()?;
+        }
+        if batch.steps > 0 {
+            if let (Some(renderer), Some(animation)) =
+                (self.renderer.as_ref(), self.animation.as_ref())
+            {
+                renderer.update_skinning(animation.skin_matrices());
+            }
+            self.redraw_pending = true;
+            event_loop.set_control_flow(ControlFlow::Poll);
+        }
+        Ok(())
+    }
+
     fn render_pending_frame(&mut self, event_loop: &ActiveEventLoop, window_id: WindowId) {
         let result = {
             let Some(renderer) = self.renderer.as_mut() else {
@@ -188,20 +298,6 @@ impl Application {
         match result {
             Ok(RenderOutcome::Presented) => {
                 self.redraw_pending = false;
-                if let Some(animation) = self.animation.as_mut() {
-                    if let Err(error) = animation.advance(FIXED_UPDATE_INTERVAL) {
-                        self.fail_and_exit(event_loop, AppError::Animation(error.to_string()));
-                        return;
-                    }
-                    if let Some(renderer) = self.renderer.as_ref() {
-                        renderer.update_skinning(animation.skin_matrices());
-                    }
-                    self.next_animation_frame = Some(Instant::now() + FIXED_UPDATE_INTERVAL);
-                }
-                event_loop.set_control_flow(
-                    self.next_animation_frame
-                        .map_or(ControlFlow::Wait, ControlFlow::WaitUntil),
-                );
                 if self.has_presented_frame {
                     tracing::debug!(?window_id, "wgpu frame presented");
                 } else {
@@ -263,7 +359,9 @@ impl ApplicationHandler for Application {
                 self.renderer = None;
                 self._asset_manager = None;
                 self.animation = None;
-                self.next_animation_frame = None;
+                self.movement = None;
+                self.platform_backend = None;
+                self.last_logic_update = None;
                 self.window = None;
             }
             WindowEvent::Resized(size) => {
@@ -303,28 +401,16 @@ impl ApplicationHandler for Application {
             WindowEvent::KeyboardInput { event, .. }
                 if event.state == ElementState::Pressed
                     && !event.repeat
-                    && event.physical_key == PhysicalKey::Code(KeyCode::Space) =>
+                    && matches!(
+                        event.physical_key,
+                        PhysicalKey::Code(
+                            KeyCode::Space | KeyCode::ArrowLeft | KeyCode::ArrowRight
+                        )
+                    ) =>
             {
-                if let Some(animation) = self.animation.as_mut() {
-                    let request = match animation.current_request() {
-                        AnimationRequest::Idle => AnimationRequest::Walk,
-                        AnimationRequest::Walk => AnimationRequest::Idle,
-                    };
-                    if animation.request(request) {
-                        tracing::info!(?request, "animation transition requested");
-                        if let Some(window) = self.window.as_ref() {
-                            window.set_title(match request {
-                                AnimationRequest::Idle => "DesktopPet [Idle]",
-                                AnimationRequest::Walk => "DesktopPet [Walk]",
-                            });
-                        }
-                        self.redraw_pending = true;
-                        self.next_animation_frame = Some(Instant::now());
-                        event_loop.set_control_flow(ControlFlow::Poll);
-                        if let Some(window) = self.window.as_ref() {
-                            window.request_redraw();
-                        }
-                    }
+                if let PhysicalKey::Code(key) = event.physical_key {
+                    self.apply_movement_command(key);
+                    event_loop.set_control_flow(ControlFlow::Poll);
                 }
             }
             WindowEvent::KeyboardInput { event, .. }
@@ -339,15 +425,10 @@ impl ApplicationHandler for Application {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        if !self.redraw_pending
-            && let Some(deadline) = self.next_animation_frame
-        {
-            if Instant::now() >= deadline {
-                self.redraw_pending = true;
-                event_loop.set_control_flow(ControlFlow::Poll);
-            } else {
-                event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
-            }
+        let now = Instant::now();
+        if let Err(error) = self.run_fixed_updates(event_loop, now) {
+            self.fail_and_exit(event_loop, error);
+            return;
         }
         if self.redraw_pending
             && let Some(window) = self.window.as_ref()
@@ -361,6 +442,11 @@ impl ApplicationHandler for Application {
             if !self.has_presented_frame {
                 self.render_pending_frame(event_loop, window_id);
             }
+        }
+        if !self.redraw_pending && self.last_logic_update.is_some() {
+            event_loop.set_control_flow(ControlFlow::WaitUntil(
+                now + self.fixed_steps.until_next_step(),
+            ));
         }
     }
 

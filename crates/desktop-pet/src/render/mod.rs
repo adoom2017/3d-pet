@@ -25,6 +25,7 @@ use winit::{dpi::PhysicalSize, window::Window};
 use crate::asset::{
     AlphaMode, CpuVertex, MAX_JOINTS, PetAsset, SamplerData, TextureData, WrapMode,
 };
+use crate::pet::HorizontalDirection;
 
 const TRIANGLE_SHADER: &str = include_str!("../../../../shaders/triangle.wgsl");
 const PET_SHADER: &str = include_str!("../../../../shaders/pet.wgsl");
@@ -108,6 +109,7 @@ enum GpuFault {
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct CameraUniform {
     view_projection_model: [[f32; 4]; 4],
+    model: [[f32; 4]; 4],
 }
 
 #[repr(C)]
@@ -167,6 +169,7 @@ pub struct Renderer {
     camera_bind_group_layout: wgpu::BindGroupLayout,
     material_bind_group_layout: wgpu::BindGroupLayout,
     pet: Option<GpuPet>,
+    facing: HorizontalDirection,
     depth_target: DepthTarget,
     config: SurfaceConfiguration,
     configured: bool,
@@ -277,6 +280,7 @@ impl Renderer {
             camera_bind_group_layout,
             material_bind_group_layout,
             pet: None,
+            facing: HorizontalDirection::Right,
             depth_target,
             config,
             configured,
@@ -301,6 +305,7 @@ impl Renderer {
                 pet.bounds_max,
                 size.width,
                 size.height,
+                self.facing,
             );
         }
         self.configure_surface();
@@ -316,6 +321,7 @@ impl Renderer {
                     asset.bounds_max,
                     self.config.width,
                     self.config.height,
+                    self.facing,
                 )),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
@@ -352,6 +358,24 @@ impl Renderer {
             bounds_min: asset.bounds_min,
             bounds_max: asset.bounds_max,
         });
+    }
+
+    pub(crate) fn set_pet_facing(&mut self, direction: HorizontalDirection) {
+        if self.facing == direction {
+            return;
+        }
+        self.facing = direction;
+        if let Some(pet) = self.pet.as_ref() {
+            write_camera_uniform(
+                &self.queue,
+                &pet.camera_buffer,
+                pet.bounds_min,
+                pet.bounds_max,
+                self.config.width,
+                self.config.height,
+                direction,
+            );
+        }
     }
 
     pub(crate) fn update_skinning(&self, skin_matrices: &[Vec<Mat4>]) {
@@ -583,7 +607,13 @@ fn create_depth_target(device: &Device, width: u32, height: u32) -> DepthTarget 
     }
 }
 
-fn camera_uniform(bounds_min: Vec3, bounds_max: Vec3, width: u32, height: u32) -> CameraUniform {
+fn camera_uniform(
+    bounds_min: Vec3,
+    bounds_max: Vec3,
+    width: u32,
+    height: u32,
+    facing: HorizontalDirection,
+) -> CameraUniform {
     let center = (bounds_min + bounds_max) * 0.5;
     let radius = ((bounds_max - bounds_min).length() * 0.5).max(0.001);
     let aspect = width.max(1) as f32 / height.max(1) as f32;
@@ -600,8 +630,20 @@ fn camera_uniform(bounds_min: Vec3, bounds_max: Vec3, width: u32, height: u32) -
     let near = (distance - radius * 1.5).max(0.01);
     let far = distance + radius * 2.5;
     let projection = Mat4::perspective_rh(vertical_fov, aspect, near, far);
+    let model = match facing {
+        HorizontalDirection::Left => Mat4::IDENTITY,
+        HorizontalDirection::Right => {
+            let view_center = view.transform_point3(center);
+            view.inverse()
+                * Mat4::from_translation(view_center)
+                * Mat4::from_rotation_y(std::f32::consts::PI)
+                * Mat4::from_translation(-view_center)
+                * view
+        }
+    };
     CameraUniform {
-        view_projection_model: (projection * view).to_cols_array_2d(),
+        view_projection_model: (projection * view * model).to_cols_array_2d(),
+        model: model.to_cols_array_2d(),
     }
 }
 
@@ -612,11 +654,14 @@ fn write_camera_uniform(
     bounds_max: Vec3,
     width: u32,
     height: u32,
+    facing: HorizontalDirection,
 ) {
     queue.write_buffer(
         buffer,
         0,
-        bytemuck::bytes_of(&camera_uniform(bounds_min, bounds_max, width, height)),
+        bytemuck::bytes_of(&camera_uniform(
+            bounds_min, bounds_max, width, height, facing,
+        )),
     );
 }
 
@@ -969,9 +1014,21 @@ mod tests {
     #[test]
     fn camera_matrix_is_finite_for_normal_and_degenerate_bounds() {
         for uniform in [
-            camera_uniform(Vec3::splat(-1.0), Vec3::splat(1.0), 320, 320),
-            camera_uniform(Vec3::ZERO, Vec3::ZERO, 0, 0),
-            camera_uniform(Vec3::new(-4.0, -1.0, -1.0), Vec3::ONE, 160, 320),
+            camera_uniform(
+                Vec3::splat(-1.0),
+                Vec3::splat(1.0),
+                320,
+                320,
+                HorizontalDirection::Right,
+            ),
+            camera_uniform(Vec3::ZERO, Vec3::ZERO, 0, 0, HorizontalDirection::Left),
+            camera_uniform(
+                Vec3::new(-4.0, -1.0, -1.0),
+                Vec3::ONE,
+                160,
+                320,
+                HorizontalDirection::Right,
+            ),
         ] {
             assert!(
                 uniform
@@ -980,7 +1037,27 @@ mod tests {
                     .flatten()
                     .all(f32::is_finite)
             );
+            assert!(uniform.model.into_iter().flatten().all(f32::is_finite));
         }
+    }
+
+    #[test]
+    fn horizontal_facing_changes_model_transform() {
+        let right = camera_uniform(
+            Vec3::splat(-1.0),
+            Vec3::splat(1.0),
+            320,
+            320,
+            HorizontalDirection::Right,
+        );
+        let left = camera_uniform(
+            Vec3::splat(-1.0),
+            Vec3::splat(1.0),
+            320,
+            320,
+            HorizontalDirection::Left,
+        );
+        assert_ne!(right.model, left.model);
     }
 
     #[test]
@@ -1044,6 +1121,7 @@ mod tests {
                 asset.bounds_max,
                 WIDTH,
                 HEIGHT,
+                HorizontalDirection::Right,
             )),
             usage: wgpu::BufferUsages::UNIFORM,
         });

@@ -128,10 +128,6 @@ impl AnimationController {
         self.rebuild_pose()
     }
 
-    pub fn current_request(&self) -> AnimationRequest {
-        self.current
-    }
-
     pub fn clip_name(&self) -> &str {
         &self.clips[self.current.index()].name
     }

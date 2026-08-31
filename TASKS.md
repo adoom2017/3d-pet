@@ -24,7 +24,7 @@
 | 3 | 静态 GLB | Done |
 | 4 | 骨骼与 Idle | Done |
 | 5 | Idle / Walk Cross Fade | Done |
-| 6 | 桌面移动 | Ready |
+| 6 | 桌面移动 | Verifying |
 | 7 | PetBrain | Blocked |
 | 8 | 边界与显示器 | Blocked |
 | 9 | 命中测试 | Blocked |
@@ -275,7 +275,7 @@ evidence/
 
 ## 9. Phase 6：桌面移动
 
-**状态：`Ready`**
+**状态：`Verifying`**
 
 **目标：** 以桌面逻辑坐标驱动窗口水平移动，同时播放 Walk，行为速度不依赖渲染 FPS。
 
@@ -285,11 +285,11 @@ evidence/
 
 **实现任务：**
 
-- [ ] 引入 `DesktopPosition` 和 `PhysicsBody`，将窗口桌面位置与模型局部/world transform 分离。
-- [ ] 以逻辑像素/秒和固定 dt 积分水平速度，集中处理系统位置舍入。
-- [ ] `Walking` 状态同步 Walk 请求、朝向和窗口位置；停止时同步 Idle。
-- [ ] 平台移动失败时保留上一次确认位置并输出带上下文错误。
-- [ ] 测试 15/30/60/120 render FPS 下相同模拟时间得到相同逻辑位置。
+- [x] 引入 `DesktopPosition` 和 `PhysicsBody`，将窗口桌面位置与模型局部/world transform 分离。
+- [x] 以逻辑像素/秒和固定 dt 积分水平速度，集中处理系统位置舍入。
+- [x] `Walking` 状态同步 Walk 请求、朝向和窗口位置；停止时同步 Idle。
+- [x] 平台移动失败时保留上一次确认位置并输出带上下文错误。
+- [x] 测试 15/30/60/120 render FPS 下相同模拟时间得到相同逻辑位置。
 
 **自动验证命令：** 执行四条全局门禁命令；运行 movement fixed-dt、rounding 和平台 mock tests。
 
@@ -299,7 +299,7 @@ evidence/
 
 **Windows 实机验收：** 不要求；Windows 门禁仅为 CI 编译、Clippy、测试和构建通过。
 
-**产物与验证证据：** movement/physics 基础、平台位置方法、测试，`evidence/phase-06/verification.md`、macOS 录屏和 CI URL。
+**产物与验证证据：** movement/physics 基础、平台位置方法、测试，`evidence/phase-06/verification.md`、macOS 截图和 CI URL。
 
 **阶段退出条件：** 移动距离对 FPS 不敏感，macOS 动画与窗口同步，全部门禁通过。
 

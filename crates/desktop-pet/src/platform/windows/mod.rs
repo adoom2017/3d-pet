@@ -2,9 +2,13 @@
 
 use std::sync::Arc;
 
-use winit::window::{Window, WindowAttributes, WindowLevel};
+use winit::{
+    dpi::LogicalPosition,
+    window::{Window, WindowAttributes, WindowLevel},
+};
 
 use super::{PlatformBackend, PlatformError};
+use crate::display::DesktopPosition;
 
 pub(super) struct NativePlatformBackend {
     window: Arc<Window>,
@@ -31,6 +35,28 @@ impl PlatformBackend for NativePlatformBackend {
             self.window.set_window_level(level);
             self.always_on_top = Some(enabled);
         }
+        Ok(())
+    }
+
+    fn window_position(&self) -> Result<DesktopPosition, PlatformError> {
+        let physical = self
+            .window
+            .outer_position()
+            .map_err(PlatformError::ReadWindowPosition)?;
+        let logical = physical.to_logical::<f64>(self.window.scale_factor());
+        Ok(DesktopPosition::new(logical.x, logical.y))
+    }
+
+    fn set_window_position(&mut self, position: DesktopPosition) -> Result<(), PlatformError> {
+        if !position.is_finite() {
+            return Err(PlatformError::InvalidWindowPosition {
+                x: position.x,
+                y: position.y,
+            });
+        }
+        let rounded = position.rounded();
+        self.window
+            .set_outer_position(LogicalPosition::new(rounded.x, rounded.y));
         Ok(())
     }
 }

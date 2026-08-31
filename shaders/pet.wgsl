@@ -1,5 +1,6 @@
 struct CameraUniform {
     view_projection_model: mat4x4<f32>,
+    model: mat4x4<f32>,
 };
 
 struct MaterialUniform {
@@ -40,7 +41,7 @@ fn vs_main(input: VertexInput) -> VertexOutput {
         skin.joint_matrices[input.joints.z] * input.weights.z +
         skin.joint_matrices[input.joints.w] * input.weights.w;
     output.position = camera.view_projection_model * skin_matrix * vec4<f32>(input.position, 1.0);
-    output.normal = normalize((skin_matrix * vec4<f32>(input.normal, 0.0)).xyz);
+    output.normal = normalize((camera.model * skin_matrix * vec4<f32>(input.normal, 0.0)).xyz);
     output.tex_coord = input.tex_coord;
     return output;
 }

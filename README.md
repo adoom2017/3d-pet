@@ -1,6 +1,6 @@
 # DesktopPet
 
-DesktopPet is a lightweight 3D desktop pet for macOS with Windows compile-and-test support. The current Phase 5 build validates and renders an animated Quaternius Fox GLB with semantic Idle/Walk playback, 250 ms cross-fades, materials, depth, automatic camera framing, and a truly transparent window. macOS is the runtime, visual, and interaction reference platform; Windows is continuously checked by CI.
+DesktopPet is a lightweight 3D desktop pet for macOS with Windows compile-and-test support. The current Phase 6 build moves an animated Quaternius Fox across the desktop with fixed-timestep physics, semantic Idle/Walk playback, 250 ms cross-fades, directional facing, and a truly transparent window. macOS is the runtime, visual, and interaction reference platform; Windows is continuously checked by CI.
 
 ## Prerequisites
 
@@ -17,7 +17,7 @@ cargo build --workspace
 cargo run -p desktop-pet
 ```
 
-The application opens a persistent 320 x 320 transparent window containing the animated default Fox. Press Space to switch between Idle and Walk with a cross-fade. Close the window normally or press Escape to exit through the clean shutdown path.
+The application opens a persistent 320 x 320 transparent window containing the animated default Fox. Press Left or Right to walk in that direction, or Space to toggle rightward walking and Idle. Close the window normally or press Escape to exit through the clean shutdown path. Desktop boundary handling is introduced in Phase 8, so the Phase 6 build can intentionally move beyond the visible work area.
 
 ## Verification
 
