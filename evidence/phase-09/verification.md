@@ -1,8 +1,8 @@
 # Phase 9 verification
 
-Status: `Verifying`
+Status: `Done`
 
-Implementation commit: recorded after the candidate commit is created.
+Implementation commit: `fff27349738491bde49a1d6766c468678ce6fa04`
 
 ## Implemented scope
 
@@ -31,7 +31,7 @@ The local Windows MSVC all-target check and strict target Clippy both passed. Gi
 
 | Date | Commit | Platform | Acceptance | Result | Evidence |
 | --- | --- | --- | --- | --- | --- |
-| 2026-08-31 | candidate | macOS 26.6.2 (25G83), arm64, Apple M5, Metal, Retina 2x | Projected fox region and adjacent transparent-area pointer transitions | Pass | `macos-observation.log` |
+| 2026-08-31 | `fff27349738491bde49a1d6766c468678ce6fa04` | macOS 26.6.2 (25G83), arm64, Apple M5, Metal, Retina 2x | Projected fox region and adjacent transparent-area pointer transitions | Pass | `macos-observation.log` |
 
 The 320x320 logical window used a 640x640 physical surface. The runtime-derived logical hit region was `[56.86, 52.35]..[233.15, 235.26]`. A real cursor event inside that region produced hit; a point immediately left of its minimum X produced miss. The window continued autonomous movement while cursor desktop/local coordinates remained coherent.
 
@@ -39,4 +39,11 @@ Cross-DPI behavior is covered deterministically at 1.25x and 2x. Both available 
 
 ## CI acceptance
 
-Pending implementation commit and GitHub Actions macOS/Windows matrix results.
+| Date | Commit | Platform | Result | Evidence |
+| --- | --- | --- | --- | --- |
+| 2026-08-31 | `fff27349738491bde49a1d6766c468678ce6fa04` | `macos-latest` | Pass (29s) | <https://github.com/adoom2017/3d-pet/actions/runs/33376698390> |
+| 2026-08-31 | `fff27349738491bde49a1d6766c468678ce6fa04` | `windows-latest` | Pass (1m28s) | <https://github.com/adoom2017/3d-pet/actions/runs/33376698390> |
+
+Windows acceptance is limited to CI format, strict Clippy, tests, and build. Windows runtime behavior has not been verified.
+
+The local automated gates, macOS Retina pointer acceptance, and macOS/Windows CI gates passed. Phase 9 is `Done`; Phase 10 is `Ready`.

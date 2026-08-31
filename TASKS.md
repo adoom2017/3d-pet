@@ -27,8 +27,8 @@
 | 6 | 桌面移动 | Done |
 | 7 | PetBrain | Done |
 | 8 | 边界与显示器 | Done |
-| 9 | 命中测试 | Verifying |
-| 10 | 平台鼠标穿透 | Blocked |
+| 9 | 命中测试 | Done |
+| 10 | 平台鼠标穿透 | Ready |
 | 11 | 拖动 | Blocked |
 | 12 | 重力与落地 | Blocked |
 | 13 | Look At Mouse | Blocked |
@@ -372,7 +372,7 @@ evidence/
 
 ## 12. Phase 9：命中测试
 
-**状态：`Verifying`**
+**状态：`Done`**
 
 **目标：** 统一鼠标坐标转换，用 2D bounding region 或 hit mask 区分宠物区域与透明区域。
 
@@ -404,7 +404,7 @@ evidence/
 
 ## 13. Phase 10：平台鼠标穿透
 
-**状态：`Blocked`**
+**状态：`Ready`**
 
 **目标：** 让透明区域把鼠标交给下层桌面/应用，同时宠物区域继续接收点击。
 

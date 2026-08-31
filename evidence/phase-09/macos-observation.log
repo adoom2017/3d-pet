@@ -1,7 +1,7 @@
 Phase 9 macOS hit-test observation
 Date: 2026-08-31
 Platform: macOS 26.6.2 (25G83), arm64, Apple M5, Retina 2x
-Build: local debug candidate based on 9afd159
+Implementation commit: fff27349738491bde49a1d6766c468678ce6fa04
 
 Observed window and render configuration:
 logical_size=320x320 physical_size=640x640 scale_factor=2.0
