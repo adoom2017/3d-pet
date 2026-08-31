@@ -1,6 +1,6 @@
 //! AppKit-backed platform implementation.
 
-use std::sync::Arc;
+use std::{cell::Cell, sync::Arc};
 
 use objc2_app_kit::{NSEvent, NSScreen, NSView};
 use objc2_foundation::MainThreadMarker;
@@ -18,6 +18,7 @@ pub(super) struct NativePlatformBackend {
     window: Arc<Window>,
     always_on_top: Option<bool>,
     click_through: IdempotentBool,
+    monitor_fallback_active: Cell<bool>,
 }
 
 impl NativePlatformBackend {
@@ -27,6 +28,7 @@ impl NativePlatformBackend {
             window,
             always_on_top: None,
             click_through: IdempotentBool::default(),
+            monitor_fallback_active: Cell::new(false),
         }
     }
 
@@ -182,13 +184,16 @@ impl PlatformBackend for NativePlatformBackend {
             })
             .collect();
         if !monitors.is_empty() {
+            self.monitor_fallback_active.set(false);
             return Ok(monitors);
         }
 
-        tracing::warn!(
-            screen_count = screens.len(),
-            "winit returned no monitors; using the AppKit screen snapshot"
-        );
+        if !self.monitor_fallback_active.replace(true) {
+            tracing::warn!(
+                screen_count = screens.len(),
+                "winit returned no monitors; using the AppKit screen snapshot"
+            );
+        }
         Ok((0..screens.len())
             .filter_map(|index| {
                 let screen = screens.get(index)?;
