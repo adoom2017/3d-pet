@@ -6,7 +6,7 @@ Status: `Verifying`
 
 | Date | Commit | Platform | Result | Evidence |
 | --- | --- | --- | --- | --- |
-| 2026-08-31 | Phase 1 implementation commit pending | macOS 26.6.2 (25G83), arm64, Retina 2x | Pass | This document and `screenshots/macos-window-alpha.png` |
+| 2026-08-31 | `78f922b5104b15ab86135c269d96034ce67f5fb7` | macOS 26.6.2 (25G83), arm64, Retina 2x | Pass | This document and `screenshots/macos-window-alpha.png` |
 
 ## Automated gates
 
@@ -39,6 +39,10 @@ The capture contains no opaque pixels or shadow. The application received a synt
 
 ## CI and Windows acceptance
 
-- The Phase 1 commit must pass the GitHub Actions macOS/Windows matrix.
+| Date | Commit | Platform | Result | Evidence |
+| --- | --- | --- | --- | --- |
+| 2026-08-31 | `78f922b5104b15ab86135c269d96034ce67f5fb7` | `macos-latest` | Pass | <https://github.com/adoom2017/3d-pet/actions/runs/33347060084> |
+| 2026-08-31 | `78f922b5104b15ab86135c269d96034ce67f5fb7` | `windows-latest` | Pass | <https://github.com/adoom2017/3d-pet/actions/runs/33347060084> |
+
 - Windows real-machine acceptance remains required for transparent composition, borderless/non-resizable behavior, and always-on-top level.
-- Phase 1 remains `Verifying`; Phase 2 remains `Blocked` until both items pass and this record contains their evidence.
+- Phase 1 remains `Verifying`; Phase 2 remains `Blocked` until the Windows real-machine result and its screenshot or log path are added here.
