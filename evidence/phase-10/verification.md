@@ -1,8 +1,8 @@
 # Phase 10 verification
 
-Status: `Verifying`
+Status: `Done`
 
-Implementation commit: `pending`
+Implementation commit: `e99a791ebcf04e954150d9cd5bb009438a9cf347`
 
 ## Implemented scope
 
@@ -31,7 +31,7 @@ Tests cover hit-to-platform policy, rapid hit changes, complete/cancelled clicks
 
 | Date | Commit | Platform | Acceptance | Result | Evidence |
 | --- | --- | --- | --- | --- | --- |
-| 2026-08-31 | `pending` | macOS 26.6.2 (25G83), arm64, Apple M5, Metal, Retina 2x | Transparent click, pet click recovery, rapid enter/leave, moving window, focus changes, teardown | Pass | `macos-observation.log` |
+| 2026-08-31 | `e99a791ebcf04e954150d9cd5bb009438a9cf347` | macOS 26.6.2 (25G83), arm64, Apple M5, Metal, Retina 2x | Transparent click, pet click recovery, rapid enter/leave, moving window, focus changes, teardown | Pass | `macos-observation.log` |
 
 With Finder established as the frontmost baseline, a CoreGraphics click at the moving pet window's transparent top-left corner changed the frontmost process to the actual underlying DingTalk window. Without restarting DesktopPet, a click in the runtime-projected fox region produced `PetIntent::Interact`, entered `Interacting`, and returned to `Idle` after approximately 500 ms.
 
@@ -41,6 +41,11 @@ Both attached displays reported Retina 2x, so mixed-DPI hardware was unavailable
 
 ## CI acceptance
 
-GitHub Actions macOS/Windows matrix: pending.
+| Date | Commit | Platform | Result | Evidence |
+| --- | --- | --- | --- | --- |
+| 2026-08-31 | `e99a791ebcf04e954150d9cd5bb009438a9cf347` | `macos-latest` | Pass (1m5s) | <https://github.com/adoom2017/3d-pet/actions/runs/33385134060> |
+| 2026-08-31 | `e99a791ebcf04e954150d9cd5bb009438a9cf347` | `windows-latest` | Pass (2m46s) | <https://github.com/adoom2017/3d-pet/actions/runs/33385134060> |
 
 Windows acceptance is intentionally limited to format, strict Clippy, tests, and build. Windows runtime mouse behavior has not been verified.
+
+The local automated gates, macOS click-through and interaction acceptance, and macOS/Windows CI gates passed. Phase 10 is `Done`; Phase 11 is `Ready`.

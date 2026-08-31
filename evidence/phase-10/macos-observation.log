@@ -1,7 +1,7 @@
 Phase 10 macOS click-through observation
 Date: 2026-08-31
 Platform: macOS 26.6.2 (25G83), arm64, Apple M5, Retina 2x
-Implementation commit: pending
+Implementation commit: e99a791ebcf04e954150d9cd5bb009438a9cf347
 
 Observed window and render configuration:
 logical_size=320x320 physical_size=640x640 scale_factor=2.0

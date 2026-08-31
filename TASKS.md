@@ -404,7 +404,7 @@ evidence/
 
 ## 13. Phase 10：平台鼠标穿透
 
-**状态：`In Progress`**
+**状态：`Done`**
 
 **目标：** 让透明区域把鼠标交给下层桌面/应用，同时宠物区域继续接收点击。
 
@@ -414,12 +414,12 @@ evidence/
 
 **实现任务：**
 
-- [ ] 在 `PlatformBackend` 实现幂等 `set_click_through`，状态变化才调用原生 API。
-- [ ] Windows 在 `platform/windows/**` 处理 `WM_NCHITTEST`，hit 返回 `HTCLIENT`、miss 返回 `HTTRANSPARENT`。
-- [ ] macOS 在 `platform/macos/**` 动态控制 `ignoresMouseEvents`，忽略期间仍轮询/接收全局光标唤醒以恢复交互。
-- [ ] 将宠物区域的完整 click 转换为 `PetIntent::Interact`；即使资源没有专用互动 clip，也必须保留可观察、可测试的状态转换。
-- [ ] 处理光标高速跨越、窗口移动、focus loss、DPI change 和退出，确保不会遗留不可交互窗口。
-- [ ] 为平台状态决策、幂等调用和命中映射加入 mock/平台单元测试；记录 unsafe 不变量。
+- [x] 在 `PlatformBackend` 实现幂等 `set_click_through`，状态变化才调用原生 API。
+- [x] Windows 在 `platform/windows/**` 处理 `WM_NCHITTEST`，hit 返回 `HTCLIENT`、miss 返回 `HTTRANSPARENT`。
+- [x] macOS 在 `platform/macos/**` 动态控制 `ignoresMouseEvents`，忽略期间仍轮询/接收全局光标唤醒以恢复交互。
+- [x] 将宠物区域的完整 click 转换为 `PetIntent::Interact`；即使资源没有专用互动 clip，也必须保留可观察、可测试的状态转换。
+- [x] 处理光标高速跨越、窗口移动、focus loss、DPI change 和退出，确保不会遗留不可交互窗口。
+- [x] 为平台状态决策、幂等调用和命中映射加入 mock/平台单元测试；记录 unsafe 不变量。
 
 **自动验证命令：** 执行四条全局门禁命令；运行 interaction-to-platform、idempotency 和 target-specific platform tests。
 
@@ -437,7 +437,7 @@ evidence/
 
 ## 14. Phase 11：拖动
 
-**状态：`Blocked`**
+**状态：`Ready`**
 
 **目标：** 实现命中后按下、记录 offset、移动、释放和高优先级 `Dragged` 状态。
 
