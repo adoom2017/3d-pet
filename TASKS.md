@@ -25,8 +25,8 @@
 | 4 | 骨骼与 Idle | Done |
 | 5 | Idle / Walk Cross Fade | Done |
 | 6 | 桌面移动 | Done |
-| 7 | PetBrain | Verifying |
-| 8 | 边界与显示器 | Blocked |
+| 7 | PetBrain | Done |
+| 8 | 边界与显示器 | Ready |
 | 9 | 命中测试 | Blocked |
 | 10 | 平台鼠标穿透 | Blocked |
 | 11 | 拖动 | Blocked |
@@ -307,7 +307,7 @@ evidence/
 
 ## 10. Phase 7：PetBrain
 
-**状态：`Verifying`**
+**状态：`Done`**
 
 **目标：** 用可注入随机源和模拟时钟实现可复现的 Idle、Walk、Turn 自主行为。
 
@@ -339,7 +339,7 @@ evidence/
 
 ## 11. Phase 8：边界与显示器
 
-**状态：`Blocked`**
+**状态：`Ready`**
 
 **目标：** 支持显示器工作区、负坐标、不同 DPI、窗口跨屏、边缘夹紧和转身。
 

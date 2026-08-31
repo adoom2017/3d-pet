@@ -1,8 +1,8 @@
 # Phase 7 verification
 
-Status: `Verifying`
+Status: `Done`
 
-Implementation commit: pending
+Implementation commit: `25d1af8102358d97be1c390db7121d653e23209a`
 
 ## Implemented scope
 
@@ -25,7 +25,12 @@ Tests cover exact Turn timing, invalid and unsupported intents, high-priority su
 
 ## CI acceptance
 
-Pending the implementation push. Windows acceptance for this phase is limited to running the same deterministic tests plus CI format, Clippy, and build; Windows runtime verification is not required.
+| Date | Commit | Platform | Result | Evidence |
+| --- | --- | --- | --- | --- |
+| 2026-08-31 | `25d1af8102358d97be1c390db7121d653e23209a` | `macos-latest` | Pass (48s) | <https://github.com/adoom2017/3d-pet/actions/runs/33366343913> |
+| 2026-08-31 | `25d1af8102358d97be1c390db7121d653e23209a` | `windows-latest` | Pass (1m11s) | <https://github.com/adoom2017/3d-pet/actions/runs/33366343913> |
+
+Windows acceptance for this phase is limited to running the same deterministic tests plus CI format, Clippy, and build; Windows runtime verification is not required.
 
 ## macOS acceptance
 
@@ -35,4 +40,4 @@ Visual inspection confirms a coherent Idle pose and a distinct animated Walk pos
 
 Work-area clamping is intentionally deferred to Phase 8, so the long observation was allowed to move beyond the current display without being treated as a Phase 7 failure.
 
-The macOS autonomous behavior gate passed. Phase 7 remains `Verifying` until the final local gates and macOS/Windows CI jobs pass.
+The macOS autonomous behavior gate, local automated gates, and macOS/Windows CI gates passed. Phase 7 is `Done`; Phase 8 is `Ready`.
