@@ -1,0 +1,32 @@
+Phase 11 macOS drag observation
+Date: 2026-08-31
+Platform: macOS 26.6.2 (25G83), arm64, Apple M5, Metal, two Retina 2x displays
+Implementation commit: 619c7560adbef4977f23ac8e2a725ab40053b3a1
+
+Observed monitor work areas:
+primary: x=0 y=33 width=1512 height=882 scale_factor=2.0
+secondary: x=1512 y=-106 width=2560 height=1410 scale_factor=2.0
+
+Representative real drag on secondary display:
+2026-08-31T11:55:34.346107Z INFO pet pointer button changed pressed=true desktop=Some(DesktopPosition { x: 2505.0, y: 62.0 }) window_logical=Some([133.33331999991924, 168.0])
+2026-08-31T11:55:34.445859Z INFO pet drag started offset=[133.33331999991924, 168.0] desktop_position=DesktopPosition { x: 2359.6666800000808, y: -82.0 }
+2026-08-31T11:55:34.445883Z INFO pet intent evaluated intent=BeginDrag context=TransitionContext { priority: Drag }
+2026-08-31T11:55:34.445900Z INFO pet state transition applied transition=StateTransition { previous: Walking, next: Dragged, outcome: Applied, facing: None, animation: Some(Idle) }
+2026-08-31T11:55:34.728406Z INFO pet pointer button changed pressed=false desktop=Some(DesktopPosition { x: 2112.0, y: 470.0 }) window_logical=Some([133.33331999991924, 168.0])
+2026-08-31T11:55:34.728444Z INFO pet drag ended release_velocity=[-30.369277661264356, 0.0]
+2026-08-31T11:55:34.728452Z INFO pet intent evaluated intent=EndDrag context=TransitionContext { priority: Drag }
+2026-08-31T11:55:34.728471Z INFO pet state transition applied transition=StateTransition { previous: Dragged, next: Idle, outcome: Applied, facing: None, animation: Some(Idle) }
+2026-08-31T11:55:34.852062Z INFO pet pointer hit changed hit=false window_logical=Some([259.0, 165.0]) desktop=Some(DesktopPosition { x: 2237.6666800000808, y: 467.0 })
+2026-08-31T11:55:34.852280Z INFO platform mouse click-through changed enabled=true
+
+Representative fast release:
+2026-08-31T11:55:24.335726Z INFO pet pointer button changed pressed=false desktop=Some(DesktopPosition { x: 2787.0, y: 446.0 }) window_logical=Some([161.99999679995608, 158.0])
+2026-08-31T11:55:24.335792Z INFO pet drag ended release_velocity=[166.7023224411888, -66.68092897647553]
+2026-08-31T11:55:24.335808Z INFO pet intent evaluated intent=EndDrag context=TransitionContext { priority: Drag }
+2026-08-31T11:55:24.335849Z INFO pet state transition applied transition=StateTransition { previous: Dragged, next: Idle, outcome: Applied, facing: None, animation: Some(Idle) }
+2026-08-31T11:55:24.523201Z INFO platform mouse click-through changed enabled=true
+
+Result: Pass. The user confirmed slow and fast dragging, preserved grab position, work-area
+edges, multi-display movement, release behavior, and transparent-area click-through recovery.
+Logs independently confirm real button delivery, Dragged priority transitions, release velocity,
+secondary-display desktop coordinates, and click-through restoration.

@@ -437,7 +437,7 @@ evidence/
 
 ## 14. Phase 11：拖动
 
-**状态：`In Progress`**
+**状态：`Done`**
 
 **目标：** 实现命中后按下、记录 offset、移动、释放和高优先级 `Dragged` 状态。
 
@@ -447,12 +447,12 @@ evidence/
 
 **实现任务：**
 
-- [ ] 实现 Pressed / Dragged 交互状态、移动阈值、按下 offset 和 pointer capture/cancel。
-- [ ] 用绝对桌面位置减 offset 计算窗口位置，不累加相邻 move delta。
-- [ ] `Dragged` 抑制 Brain、普通物理和 click-through，释放后恢复正确优先级。
-- [ ] 保存有界、带时间戳的移动样本并计算稳定 release velocity。
-- [ ] 处理窗口边缘、跨显示器/DPI、focus loss、系统 cancel 和应用退出。
-- [ ] 添加 offset、阈值、丢事件、cancel、跨 DPI 和速度计算的纯逻辑测试。
+- [x] 实现 Pressed / Dragged 交互状态、移动阈值、按下 offset 和 pointer capture/cancel。
+- [x] 用绝对桌面位置减 offset 计算窗口位置，不累加相邻 move delta。
+- [x] `Dragged` 抑制 Brain、普通物理和 click-through，释放后恢复正确优先级。
+- [x] 保存有界、带时间戳的移动样本并计算稳定 release velocity。
+- [x] 处理窗口边缘、跨显示器/DPI、focus loss、系统 cancel 和应用退出。
+- [x] 添加 offset、阈值、丢事件、cancel、跨 DPI 和速度计算的纯逻辑测试。
 
 **自动验证命令：** 执行四条全局门禁命令；运行 InteractionController drag/cancel/release tests。
 
@@ -462,7 +462,7 @@ evidence/
 
 **Windows 实机验收：** 不要求；Windows 门禁仅为 CI 编译、Clippy、测试和构建通过。
 
-**产物与验证证据：** InteractionController、pointer capture/取消路径、测试，`evidence/phase-11/verification.md`、macOS 录屏和 CI URL。
+**产物与验证证据：** InteractionController、pointer capture/取消路径、测试，`evidence/phase-11/verification.md`、macOS 运行日志和 CI URL。
 
 **阶段退出条件：** 拖动不跳位、不遗留 capture/click-through 状态，macOS 场景和全部门禁通过。
 
@@ -470,7 +470,7 @@ evidence/
 
 ## 15. Phase 12：重力与落地
 
-**状态：`Blocked`**
+**状态：`Ready`**
 
 **目标：** 拖动释放后完成 Falling -> Landing -> Idle，包含释放速度、重力积分和工作区地面夹紧。
 
