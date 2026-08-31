@@ -25,7 +25,7 @@
 | 4 | 骨骼与 Idle | Done |
 | 5 | Idle / Walk Cross Fade | Done |
 | 6 | 桌面移动 | Done |
-| 7 | PetBrain | Ready |
+| 7 | PetBrain | Verifying |
 | 8 | 边界与显示器 | Blocked |
 | 9 | 命中测试 | Blocked |
 | 10 | 平台鼠标穿透 | Blocked |
@@ -307,7 +307,7 @@ evidence/
 
 ## 10. Phase 7：PetBrain
 
-**状态：`Ready`**
+**状态：`Verifying`**
 
 **目标：** 用可注入随机源和模拟时钟实现可复现的 Idle、Walk、Turn 自主行为。
 
@@ -317,11 +317,11 @@ evidence/
 
 **实现任务：**
 
-- [ ] 定义 `PetObservation`、`PetIntent`、`RandomSource`、时钟边界和 `PetBrain`。
-- [ ] 配置 Idle 等待范围、Walk 持续时间、方向选择和 Turn 规则，参数集中且有合法范围。
-- [ ] Brain 只输出意图，不调用窗口、动画、资源或 renderer。
-- [ ] 状态机拒绝非法转换，高优先级状态可抑制普通 Brain 意图。
-- [ ] 使用固定 seed 和模拟时钟断言完整决策序列、边界概率和重放一致性。
+- [x] 定义 `PetObservation`、`PetIntent`、`RandomSource`、时钟边界和 `PetBrain`。
+- [x] 配置 Idle 等待范围、Walk 持续时间、方向选择和 Turn 规则，参数集中且有合法范围。
+- [x] Brain 只输出意图，不调用窗口、动画、资源或 renderer。
+- [x] 状态机拒绝非法转换，高优先级状态可抑制普通 Brain 意图。
+- [x] 使用固定 seed 和模拟时钟断言完整决策序列、边界概率和重放一致性。
 
 **自动验证命令：** 执行四条全局门禁命令；运行 brain deterministic、state-machine transition 和 invalid-intent tests。
 

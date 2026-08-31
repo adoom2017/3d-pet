@@ -14,13 +14,19 @@ use crate::{
     asset::{AssetManager, default_asset_root, default_manifest_path},
     config::AppConfig,
     error::AppError,
-    pet::{HorizontalDirection, MovementController, MovementState},
+    pet::{
+        BehaviorStateMachine, BrainConfig, HorizontalDirection, MonotonicClock, MovementController,
+        PetAnimationIntent, PetBrain, PetIntent, PetObservation, PetState, PetStateMachine,
+        SimulationClock, SplitMix64, StateTransition, TransitionContext, TransitionOutcome,
+        WanderingPetBrain,
+    },
     platform::{self, PlatformBackend},
     render::{RenderOutcome, Renderer},
     time::{FIXED_UPDATE_INTERVAL, FixedStepAccumulator},
 };
 
 pub const PET_WINDOW_LOGICAL_SIZE: f64 = 320.0;
+const DEFAULT_BRAIN_SEED: u64 = 0x3d50_6574_2026_0831;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct WindowSpec {
@@ -75,6 +81,10 @@ pub struct Application {
     _asset_manager: Option<AssetManager>,
     animation: Option<AnimationController>,
     movement: Option<MovementController>,
+    brain: Option<WanderingPetBrain>,
+    brain_rng: SplitMix64,
+    state_machine: Option<BehaviorStateMachine>,
+    simulation_clock: SimulationClock,
     last_logic_update: Option<Instant>,
     fixed_steps: FixedStepAccumulator,
     redraw_pending: bool,
@@ -94,6 +104,10 @@ impl Application {
             _asset_manager: None,
             animation: None,
             movement: None,
+            brain: None,
+            brain_rng: SplitMix64::seeded(DEFAULT_BRAIN_SEED),
+            state_machine: None,
+            simulation_clock: SimulationClock::default(),
             last_logic_update: None,
             fixed_steps: FixedStepAccumulator::default(),
             redraw_pending: false,
@@ -171,6 +185,13 @@ impl Application {
         self._asset_manager = Some(asset_manager);
         self.animation = Some(animation);
         self.movement = Some(MovementController::new(initial_position));
+        self.brain = Some(
+            WanderingPetBrain::new(BrainConfig::default())
+                .map_err(|error| AppError::Behavior(error.to_string()))?,
+        );
+        self.brain_rng = SplitMix64::seeded(DEFAULT_BRAIN_SEED);
+        self.state_machine = Some(BehaviorStateMachine::default());
+        self.simulation_clock = SimulationClock::default();
         self.fixed_steps = FixedStepAccumulator::default();
         self.last_logic_update = Some(Instant::now());
         self.redraw_pending = true;
@@ -192,9 +213,6 @@ impl Application {
         let Some(movement) = self.movement.as_mut() else {
             return Ok(());
         };
-        if !matches!(movement.state(), MovementState::Walking(_)) {
-            return Ok(());
-        }
         let platform_backend = self
             .platform_backend
             .as_mut()
@@ -211,44 +229,105 @@ impl Application {
     }
 
     fn apply_movement_command(&mut self, key: KeyCode) {
-        let Some(movement) = self.movement.as_mut() else {
-            return;
-        };
-        let direction = match key {
-            KeyCode::ArrowLeft => Some(HorizontalDirection::Left),
-            KeyCode::ArrowRight => Some(HorizontalDirection::Right),
-            KeyCode::Space => match movement.state() {
-                MovementState::Idle => Some(HorizontalDirection::Right),
-                MovementState::Walking(_) => None,
+        let intent = match key {
+            KeyCode::ArrowLeft => PetIntent::Walk {
+                direction: HorizontalDirection::Left,
+            },
+            KeyCode::ArrowRight => PetIntent::Walk {
+                direction: HorizontalDirection::Right,
+            },
+            KeyCode::Space => match self.state_machine.as_ref().map(PetStateMachine::state) {
+                Some(PetState::Idle) => PetIntent::Walk {
+                    direction: HorizontalDirection::Right,
+                },
+                Some(_) => PetIntent::StayIdle,
+                None => return,
             },
             _ => return,
         };
-        match direction {
-            Some(direction) => movement.start_walking(direction),
-            None => movement.stop(),
-        }
+        self.apply_pet_intent(intent, TransitionContext::EXPLICIT);
+    }
 
-        let request = match movement.state() {
-            MovementState::Idle => AnimationRequest::Idle,
-            MovementState::Walking(direction) => {
-                if let Some(renderer) = self.renderer.as_mut() {
-                    renderer.set_pet_facing(direction);
-                }
-                AnimationRequest::Walk
-            }
+    fn apply_pet_intent(&mut self, intent: PetIntent, context: TransitionContext) {
+        let Some(state_machine) = self.state_machine.as_mut() else {
+            return;
         };
-        if let Some(animation) = self.animation.as_mut() {
-            animation.request(request);
+        let transition = state_machine.apply(intent, &context);
+        tracing::info!(?intent, ?context, "pet intent evaluated");
+        self.dispatch_transition(transition);
+    }
+
+    fn dispatch_transition(&mut self, transition: StateTransition) {
+        if matches!(transition.outcome, TransitionOutcome::Rejected(_)) {
+            tracing::warn!(?transition, "pet state transition rejected");
+            return;
         }
-        tracing::info!(?request, ?direction, "movement command applied");
+        if transition.animation.is_none() && transition.facing.is_none() {
+            return;
+        }
+        let direction = transition
+            .facing
+            .or_else(|| self.state_machine.as_ref().map(PetStateMachine::facing));
+        if let Some(direction) = transition.facing
+            && let Some(renderer) = self.renderer.as_mut()
+        {
+            renderer.set_pet_facing(direction);
+        }
+        if let Some(animation_intent) = transition.animation {
+            let request = match animation_intent {
+                PetAnimationIntent::Idle => AnimationRequest::Idle,
+                PetAnimationIntent::Walk => AnimationRequest::Walk,
+            };
+            if let Some(animation) = self.animation.as_mut() {
+                animation.request(request);
+            }
+        }
+        if let Some(movement) = self.movement.as_mut() {
+            match (transition.next, direction) {
+                (PetState::Walking, Some(direction)) => movement.start_walking(direction),
+                _ => movement.stop(),
+            }
+        }
+        tracing::info!(?transition, "pet state transition applied");
         if let Some(window) = self.window.as_ref() {
-            window.set_title(match request {
-                AnimationRequest::Idle => "DesktopPet [Idle]",
-                AnimationRequest::Walk => "DesktopPet [Walking]",
-            });
+            let title = match (transition.next, direction) {
+                (PetState::Walking, Some(HorizontalDirection::Left)) => "DesktopPet [Walking Left]",
+                (PetState::Walking, Some(HorizontalDirection::Right)) => {
+                    "DesktopPet [Walking Right]"
+                }
+                (PetState::Turning, Some(HorizontalDirection::Left)) => "DesktopPet [Turning Left]",
+                (PetState::Turning, Some(HorizontalDirection::Right)) => {
+                    "DesktopPet [Turning Right]"
+                }
+                _ => "DesktopPet [Idle]",
+            };
+            window.set_title(title);
             window.request_redraw();
         }
         self.redraw_pending = true;
+    }
+
+    fn update_behavior(&mut self) {
+        self.simulation_clock.advance(FIXED_UPDATE_INTERVAL);
+        let intent = match (self.brain.as_mut(), self.state_machine.as_ref()) {
+            (Some(brain), Some(state_machine)) => brain.update(
+                &PetObservation {
+                    state: state_machine.state(),
+                    facing: state_machine.facing(),
+                },
+                self.simulation_clock.now(),
+                &mut self.brain_rng,
+            ),
+            _ => None,
+        };
+        if let Some(intent) = intent {
+            self.apply_pet_intent(intent, TransitionContext::BRAIN);
+        }
+        if let Some(state_machine) = self.state_machine.as_mut() {
+            let transition =
+                state_machine.fixed_update(FIXED_UPDATE_INTERVAL, &TransitionContext::BRAIN);
+            self.dispatch_transition(transition);
+        }
     }
 
     fn run_fixed_updates(
@@ -269,6 +348,7 @@ impl Application {
             );
         }
         for _ in 0..batch.steps {
+            self.update_behavior();
             if let Some(animation) = self.animation.as_mut() {
                 animation
                     .advance(FIXED_UPDATE_INTERVAL)
@@ -360,6 +440,8 @@ impl ApplicationHandler for Application {
                 self._asset_manager = None;
                 self.animation = None;
                 self.movement = None;
+                self.brain = None;
+                self.state_machine = None;
                 self.platform_backend = None;
                 self.last_logic_update = None;
                 self.window = None;

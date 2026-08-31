@@ -24,6 +24,9 @@ pub enum AppError {
 
     #[error("animation failed: {0}")]
     Animation(String),
+
+    #[error("pet behavior failed: {0}")]
+    Behavior(String),
 }
 
 #[derive(Debug, Error)]
