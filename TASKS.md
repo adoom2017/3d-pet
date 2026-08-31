@@ -24,8 +24,8 @@
 | 3 | 静态 GLB | Done |
 | 4 | 骨骼与 Idle | Done |
 | 5 | Idle / Walk Cross Fade | Done |
-| 6 | 桌面移动 | Verifying |
-| 7 | PetBrain | Blocked |
+| 6 | 桌面移动 | Done |
+| 7 | PetBrain | Ready |
 | 8 | 边界与显示器 | Blocked |
 | 9 | 命中测试 | Blocked |
 | 10 | 平台鼠标穿透 | Blocked |
@@ -275,7 +275,7 @@ evidence/
 
 ## 9. Phase 6：桌面移动
 
-**状态：`Verifying`**
+**状态：`Done`**
 
 **目标：** 以桌面逻辑坐标驱动窗口水平移动，同时播放 Walk，行为速度不依赖渲染 FPS。
 
@@ -307,7 +307,7 @@ evidence/
 
 ## 10. Phase 7：PetBrain
 
-**状态：`Blocked`**
+**状态：`Ready`**
 
 **目标：** 用可注入随机源和模拟时钟实现可复现的 Idle、Walk、Turn 自主行为。
 

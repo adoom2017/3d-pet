@@ -1,8 +1,8 @@
 # Phase 6 verification
 
-Status: `Verifying`
+Status: `Done`
 
-Implementation commit: pending
+Implementation commit: `1c0a8551ec2e212cb0a348038114b4b9e5d9953e`
 
 ## Implemented scope
 
@@ -25,7 +25,12 @@ Deterministic tests cover 80 logical px/s integration, negative-coordinate round
 
 ## CI acceptance
 
-Pending the implementation push. Windows acceptance for this phase is limited to CI format, Clippy, tests, and build; Windows runtime verification is not required.
+| Date | Commit | Platform | Result | Evidence |
+| --- | --- | --- | --- | --- |
+| 2026-08-31 | `1c0a8551ec2e212cb0a348038114b4b9e5d9953e` | `macos-latest` | Pass (46s) | <https://github.com/adoom2017/3d-pet/actions/runs/33363672387> |
+| 2026-08-31 | `1c0a8551ec2e212cb0a348038114b4b9e5d9953e` | `windows-latest` | Pass (1m18s) | <https://github.com/adoom2017/3d-pet/actions/runs/33363672387> |
+
+Windows acceptance for this phase is limited to CI format, Clippy, tests, and build; Windows runtime verification is not required.
 
 ## macOS acceptance
 
@@ -43,4 +48,4 @@ Evidence captures:
 
 Window capture renders transparent pixels as black; the live window remained transparently composited over the desktop. Work-area clamping is intentionally deferred to Phase 8.
 
-The macOS visual and interaction gate passed. Phase 6 remains `Verifying` until the final local gates and macOS/Windows CI jobs pass.
+The macOS visual and interaction gate, local automated gates, and macOS/Windows CI gates passed. Phase 6 is `Done`; Phase 7 is `Ready`.
