@@ -2,7 +2,10 @@
 
 use std::{cell::Cell, sync::Arc};
 
-use objc2_app_kit::{NSEvent, NSScreen, NSView};
+use objc2_app_kit::{
+    NSEvent, NSFloatingWindowLevel, NSNormalWindowLevel, NSScreen, NSView, NSWindow,
+    NSWindowCollectionBehavior,
+};
 use objc2_foundation::MainThreadMarker;
 use winit::{
     dpi::LogicalPosition,
@@ -49,6 +52,81 @@ impl NativePlatformBackend {
         let frame = primary.frame();
         Ok(frame.origin.y + frame.size.height)
     }
+
+    fn with_native_window<T>(
+        &self,
+        operation: impl FnOnce(&NSWindow) -> Result<T, PlatformError>,
+    ) -> Result<T, PlatformError> {
+        MainThreadMarker::new().ok_or_else(|| {
+            PlatformError::ConfigureWindowOrdering(
+                "NSWindow ordering must be configured on the macOS main thread".to_owned(),
+            )
+        })?;
+        let handle = self.window.window_handle().map_err(|error| {
+            PlatformError::ConfigureWindowOrdering(format!(
+                "winit did not expose an AppKit window handle: {error}"
+            ))
+        })?;
+        let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
+            return Err(PlatformError::ConfigureWindowOrdering(
+                "winit exposed a non-AppKit window handle on macOS".to_owned(),
+            ));
+        };
+        // SAFETY: raw-window-handle guarantees ns_view is the live NSView owned by the winit
+        // window. This method is restricted to AppKit's main thread.
+        let view = unsafe { &*handle.ns_view.as_ptr().cast::<NSView>() };
+        let native_window = view.window().ok_or_else(|| {
+            PlatformError::ConfigureWindowOrdering(
+                "the winit NSView is not attached to an NSWindow".to_owned(),
+            )
+        })?;
+        operation(&native_window)
+    }
+
+    fn apply_window_ordering(
+        &self,
+        enabled: bool,
+        bring_to_front: bool,
+    ) -> Result<(), PlatformError> {
+        self.with_native_window(|native_window| {
+            let level = if enabled {
+                NSFloatingWindowLevel
+            } else {
+                NSNormalWindowLevel
+            };
+            native_window.setLevel(level);
+            if enabled {
+                // Preserve winit/AppKit defaults while making the pet available on every Space
+                // and alongside full-screen apps. These flags also prevent a display transition
+                // from assigning the borderless window to an inactive Space.
+                let mut behavior = unsafe { native_window.collectionBehavior() };
+                behavior.remove(
+                    NSWindowCollectionBehavior::MoveToActiveSpace
+                        | NSWindowCollectionBehavior::Managed,
+                );
+                behavior.insert(
+                    NSWindowCollectionBehavior::CanJoinAllSpaces
+                        | NSWindowCollectionBehavior::FullScreenAuxiliary
+                        | NSWindowCollectionBehavior::IgnoresCycle,
+                );
+                // SAFETY: collection behavior is changed on the main thread for a live NSWindow.
+                unsafe { native_window.setCollectionBehavior(behavior) };
+                if bring_to_front {
+                    // SAFETY: ordering a live window from AppKit's main thread does not transfer
+                    // key-window focus, which is important for a desktop pet.
+                    unsafe { native_window.orderFrontRegardless() };
+                }
+            }
+
+            let applied_level = unsafe { native_window.level() };
+            if applied_level != level {
+                return Err(PlatformError::ConfigureWindowOrdering(format!(
+                    "NSWindow reported level={applied_level} after requesting {level}"
+                )));
+            }
+            Ok(())
+        })
+    }
 }
 
 impl PlatformBackend for NativePlatformBackend {
@@ -60,9 +138,14 @@ impl PlatformBackend for NativePlatformBackend {
                 WindowLevel::Normal
             };
             self.window.set_window_level(level);
+            self.apply_window_ordering(enabled, false)?;
             self.always_on_top = Some(enabled);
         }
         Ok(())
+    }
+
+    fn reassert_window_order(&mut self) -> Result<(), PlatformError> {
+        self.apply_window_ordering(self.always_on_top.unwrap_or(false), true)
     }
 
     fn set_click_through(&mut self, enabled: bool) -> Result<(), PlatformError> {

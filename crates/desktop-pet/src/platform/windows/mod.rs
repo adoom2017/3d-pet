@@ -145,6 +145,18 @@ impl PlatformBackend for NativePlatformBackend {
         Ok(())
     }
 
+    fn reassert_window_order(&mut self) -> Result<(), PlatformError> {
+        if let Some(enabled) = self.always_on_top {
+            let level = if enabled {
+                WindowLevel::AlwaysOnTop
+            } else {
+                WindowLevel::Normal
+            };
+            self.window.set_window_level(level);
+        }
+        Ok(())
+    }
+
     fn set_click_through(&mut self, enabled: bool) -> Result<(), PlatformError> {
         self.install_click_through_subclass()?;
         let native = self.click_through_native.as_ref();

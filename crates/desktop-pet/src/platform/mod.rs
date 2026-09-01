@@ -19,6 +19,7 @@ use windows as implementation;
 
 pub(crate) trait PlatformBackend {
     fn set_always_on_top(&mut self, enabled: bool) -> Result<(), PlatformError>;
+    fn reassert_window_order(&mut self) -> Result<(), PlatformError>;
     fn set_click_through(&mut self, enabled: bool) -> Result<(), PlatformError>;
     fn cursor_position(&self) -> Result<Option<DesktopPosition>, PlatformError>;
     fn window_position(&self) -> Result<DesktopPosition, PlatformError>;
@@ -36,6 +37,9 @@ pub(crate) enum PlatformError {
     EnumerateMonitors(String),
     #[error("failed to configure native mouse handling: {0}")]
     ConfigureMouseHandling(String),
+    #[cfg(target_os = "macos")]
+    #[error("failed to configure native window ordering: {0}")]
+    ConfigureWindowOrdering(String),
     #[error("failed to read the global cursor position: {0}")]
     ReadCursorPosition(String),
 }

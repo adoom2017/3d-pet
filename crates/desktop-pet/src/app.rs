@@ -41,6 +41,12 @@ const DEFAULT_BRAIN_SEED: u64 = 0x3d50_6574_2026_0831;
 const MONITOR_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 const BACKLOG_WARNING_INTERVAL: Duration = Duration::from_secs(5);
 const RUNTIME_METRICS_INTERVAL: Duration = Duration::from_secs(10);
+const OCCLUSION_SUSPEND_DELAY: Duration = Duration::from_millis(500);
+
+fn occlusion_suspends_rendering(occluded_for: Option<Duration>, state: Option<PetState>) -> bool {
+    occluded_for.is_some_and(|elapsed| elapsed >= OCCLUSION_SUSPEND_DELAY)
+        && matches!(state, None | Some(PetState::Idle | PetState::Sleeping))
+}
 
 fn log_monitor_snapshot(display_manager: &DisplayManager) {
     if display_manager.monitors().is_empty() {
@@ -128,6 +134,7 @@ pub struct Application {
     fixed_steps: FixedStepAccumulator,
     frame_scheduler: FrameScheduler,
     window_occluded: bool,
+    window_occluded_since: Option<Instant>,
     surface_suspended: bool,
     last_backlog_warning: Option<Instant>,
     metrics_period_started: Option<Instant>,
@@ -165,6 +172,7 @@ impl Application {
             fixed_steps: FixedStepAccumulator::default(),
             frame_scheduler,
             window_occluded: false,
+            window_occluded_since: None,
             surface_suspended: false,
             last_backlog_warning: None,
             metrics_period_started: None,
@@ -276,6 +284,7 @@ impl Application {
         self.frame_scheduler
             .set_activity(FrameActivity::Idle, Duration::ZERO);
         self.window_occluded = false;
+        self.window_occluded_since = None;
         self.surface_suspended = false;
         self.last_backlog_warning = None;
         self.metrics_period_started = Some(now);
@@ -287,6 +296,11 @@ impl Application {
         if let Some(window) = self.window.as_ref() {
             window.set_visible(true);
         }
+        self.platform_backend
+            .as_mut()
+            .ok_or_else(|| AppError::Platform("platform backend is unavailable".to_owned()))?
+            .reassert_window_order()
+            .map_err(|error| AppError::Platform(error.to_string()))?;
         event_loop.set_control_flow(ControlFlow::WaitUntil(now));
         Ok(())
     }
@@ -772,8 +786,7 @@ impl Application {
                 }
             }
             Ok(RenderOutcome::SkippedOccluded) => {
-                self.surface_suspended = true;
-                self.frame_scheduler.clear_dirty();
+                self.frame_scheduler.defer_redraw(now);
             }
             Ok(RenderOutcome::Reconfigured | RenderOutcome::SkippedTimeout) => {
                 self.frame_scheduler.defer_redraw(now);
@@ -793,8 +806,16 @@ impl Application {
         self.fixed_steps.reset();
     }
 
-    fn frame_activity(&self) -> FrameActivity {
-        if self.window_occluded || self.surface_suspended || self.window.is_none() {
+    fn frame_activity(&self, now: Instant) -> FrameActivity {
+        let occluded_for = self
+            .window_occluded
+            .then(|| now.saturating_duration_since(self.window_occluded_since.unwrap_or(now)));
+        if occlusion_suspends_rendering(
+            occluded_for,
+            self.state_machine.as_ref().map(PetStateMachine::state),
+        ) || self.surface_suspended
+            || self.window.is_none()
+        {
             return FrameActivity::Static;
         }
         match self.state_machine.as_ref().map(PetStateMachine::state) {
@@ -1026,8 +1047,16 @@ impl ApplicationHandler for Application {
             WindowEvent::Occluded(occluded) => {
                 self.window_occluded = occluded;
                 if occluded {
-                    self.frame_scheduler.clear_dirty();
+                    self.window_occluded_since.get_or_insert_with(Instant::now);
+                    if let Some(platform_backend) = self.platform_backend.as_mut()
+                        && let Err(error) = platform_backend.reassert_window_order()
+                    {
+                        self.fail_and_exit(event_loop, AppError::Platform(error.to_string()));
+                        return;
+                    }
+                    self.frame_scheduler.mark_dirty();
                 } else {
+                    self.window_occluded_since = None;
                     self.surface_suspended = false;
                     self.reset_logic_timing();
                     self.frame_scheduler.mark_dirty();
@@ -1072,7 +1101,7 @@ impl ApplicationHandler for Application {
             .interaction_epoch
             .map(|epoch| now.saturating_duration_since(epoch))
             .unwrap_or_default();
-        let mut activity = self.frame_activity();
+        let mut activity = self.frame_activity(now);
         if self.frame_scheduler.set_activity(activity, scheduler_now) {
             tracing::info!(
                 mode = activity.label(),
@@ -1087,7 +1116,7 @@ impl ApplicationHandler for Application {
             self.fail_and_exit(event_loop, error);
             return;
         }
-        activity = self.frame_activity();
+        activity = self.frame_activity(now);
         if self.frame_scheduler.set_activity(activity, scheduler_now) {
             tracing::info!(
                 mode = activity.label(),
@@ -1099,7 +1128,17 @@ impl ApplicationHandler for Application {
         let brain_deadline = (activity != FrameActivity::Static)
             .then(|| self.brain_wall_deadline(scheduler_now))
             .flatten();
-        let decision = self.frame_scheduler.decision(scheduler_now, brain_deadline);
+        let occlusion_deadline = self.window_occluded_since.and_then(|started| {
+            let deadline = started.checked_add(OCCLUSION_SUSPEND_DELAY)?;
+            (deadline > now).then(|| scheduler_now + deadline.saturating_duration_since(now))
+        });
+        let external_deadline = [brain_deadline, occlusion_deadline]
+            .into_iter()
+            .flatten()
+            .min();
+        let decision = self
+            .frame_scheduler
+            .decision(scheduler_now, external_deadline);
         if decision.request_redraw
             && let Some(window) = self.window.as_ref()
         {
@@ -1171,5 +1210,39 @@ mod tests {
         let attributes = WindowSpec::from_config(&config).window_attributes();
 
         assert_eq!(attributes.window_level, WindowLevel::Normal);
+    }
+
+    #[test]
+    fn transient_occlusion_does_not_suspend_rendering() {
+        assert!(!occlusion_suspends_rendering(
+            Some(OCCLUSION_SUSPEND_DELAY - Duration::from_millis(1)),
+            Some(PetState::Idle),
+        ));
+    }
+
+    #[test]
+    fn stable_occlusion_suspends_inactive_pet() {
+        for state in [PetState::Idle, PetState::Sleeping] {
+            assert!(occlusion_suspends_rendering(
+                Some(OCCLUSION_SUSPEND_DELAY),
+                Some(state),
+            ));
+        }
+    }
+
+    #[test]
+    fn active_motion_ignores_occlusion() {
+        for state in [
+            PetState::Dragged,
+            PetState::Falling,
+            PetState::Landing,
+            PetState::Walking,
+            PetState::Turning,
+        ] {
+            assert!(!occlusion_suspends_rendering(
+                Some(Duration::from_secs(10)),
+                Some(state),
+            ));
+        }
     }
 }
