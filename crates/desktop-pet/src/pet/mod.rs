@@ -412,6 +412,8 @@ impl BrainConfig {
 }
 
 pub(crate) trait PetBrain {
+    fn next_deadline(&self) -> Option<Duration>;
+
     fn update(
         &mut self,
         observation: &PetObservation,
@@ -443,6 +445,10 @@ impl WanderingPetBrain {
 }
 
 impl PetBrain for WanderingPetBrain {
+    fn next_deadline(&self) -> Option<Duration> {
+        self.deadline
+    }
+
     fn update(
         &mut self,
         observation: &PetObservation,

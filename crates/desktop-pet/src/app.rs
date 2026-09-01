@@ -33,12 +33,14 @@ use crate::{
     },
     platform::{self, PlatformBackend},
     render::{RenderOutcome, Renderer},
-    time::{FIXED_UPDATE_INTERVAL, FixedStepAccumulator},
+    time::{FIXED_UPDATE_INTERVAL, FixedStepAccumulator, FrameActivity, FrameScheduler},
 };
 
 pub const PET_WINDOW_LOGICAL_SIZE: f64 = 320.0;
 const DEFAULT_BRAIN_SEED: u64 = 0x3d50_6574_2026_0831;
 const MONITOR_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
+const BACKLOG_WARNING_INTERVAL: Duration = Duration::from_secs(5);
+const RUNTIME_METRICS_INTERVAL: Duration = Duration::from_secs(10);
 
 fn log_monitor_snapshot(display_manager: &DisplayManager) {
     if display_manager.monitors().is_empty() {
@@ -124,7 +126,14 @@ pub struct Application {
     interaction_epoch: Option<Instant>,
     last_logic_update: Option<Instant>,
     fixed_steps: FixedStepAccumulator,
-    redraw_pending: bool,
+    frame_scheduler: FrameScheduler,
+    window_occluded: bool,
+    surface_suspended: bool,
+    last_backlog_warning: Option<Instant>,
+    metrics_period_started: Option<Instant>,
+    metrics_presented_frames: u64,
+    metrics_fixed_steps: u64,
+    metrics_dropped_time: Duration,
     redraw_request_logged: bool,
     has_presented_frame: bool,
     fatal_error: Option<AppError>,
@@ -133,6 +142,7 @@ pub struct Application {
 impl Application {
     pub fn new(config: AppConfig) -> Result<Self, AppError> {
         config.validate()?;
+        let frame_scheduler = FrameScheduler::new(config.fps);
         Ok(Self {
             config,
             window: None,
@@ -153,7 +163,14 @@ impl Application {
             interaction_epoch: None,
             last_logic_update: None,
             fixed_steps: FixedStepAccumulator::default(),
-            redraw_pending: false,
+            frame_scheduler,
+            window_occluded: false,
+            surface_suspended: false,
+            last_backlog_warning: None,
+            metrics_period_started: None,
+            metrics_presented_frames: 0,
+            metrics_fixed_steps: 0,
+            metrics_dropped_time: Duration::ZERO,
             redraw_request_logged: false,
             has_presented_frame: false,
             fatal_error: None,
@@ -255,13 +272,22 @@ impl Application {
         let now = Instant::now();
         self.interaction_epoch = Some(now);
         self.last_logic_update = Some(now);
-        self.redraw_pending = true;
+        self.frame_scheduler = FrameScheduler::new(self.config.fps);
+        self.frame_scheduler
+            .set_activity(FrameActivity::Idle, Duration::ZERO);
+        self.window_occluded = false;
+        self.surface_suspended = false;
+        self.last_backlog_warning = None;
+        self.metrics_period_started = Some(now);
+        self.metrics_presented_frames = 0;
+        self.metrics_fixed_steps = 0;
+        self.metrics_dropped_time = Duration::ZERO;
         self.redraw_request_logged = false;
         self.refresh_pointer_from_platform()?;
         if let Some(window) = self.window.as_ref() {
             window.set_visible(true);
         }
-        event_loop.set_control_flow(ControlFlow::Poll);
+        event_loop.set_control_flow(ControlFlow::WaitUntil(now));
         Ok(())
     }
 
@@ -384,6 +410,7 @@ impl Application {
         if display_manager.refresh(monitors) {
             tracing::info!("monitor topology or work area changed");
             log_monitor_snapshot(display_manager);
+            self.frame_scheduler.mark_dirty();
         }
         Ok(())
     }
@@ -617,12 +644,12 @@ impl Application {
                 (PetState::Dragged, _) => "DesktopPet [Dragged]",
                 (PetState::Falling, _) => "DesktopPet [Falling]",
                 (PetState::Landing, _) => "DesktopPet [Landing]",
+                (PetState::Sleeping, _) => "DesktopPet [Sleeping]",
                 _ => "DesktopPet [Idle]",
             };
             window.set_title(title);
-            window.request_redraw();
         }
-        self.redraw_pending = true;
+        self.frame_scheduler.mark_dirty();
     }
 
     fn update_behavior(&mut self) {
@@ -675,22 +702,25 @@ impl Application {
         }
     }
 
-    fn run_fixed_updates(
-        &mut self,
-        event_loop: &ActiveEventLoop,
-        now: Instant,
-    ) -> Result<(), AppError> {
+    fn run_fixed_updates(&mut self, now: Instant) -> Result<(), AppError> {
         let Some(previous) = self.last_logic_update.replace(now) else {
             return Ok(());
         };
         let batch = self
             .fixed_steps
             .push(now.saturating_duration_since(previous));
-        if !batch.dropped_time.is_zero() {
+        self.metrics_fixed_steps = self.metrics_fixed_steps.saturating_add(batch.steps as u64);
+        self.metrics_dropped_time = self.metrics_dropped_time.saturating_add(batch.dropped_time);
+        if !batch.dropped_time.is_zero()
+            && self
+                .last_backlog_warning
+                .is_none_or(|last| now.saturating_duration_since(last) >= BACKLOG_WARNING_INTERVAL)
+        {
             tracing::warn!(
                 dropped_ms = batch.dropped_time.as_secs_f64() * 1_000.0,
                 "fixed update backlog was dropped"
             );
+            self.last_backlog_warning = Some(now);
         }
         for _ in 0..batch.steps {
             self.refresh_pointer_from_platform()?;
@@ -716,13 +746,13 @@ impl Application {
             {
                 renderer.update_skinning(animation.skin_matrices());
             }
-            self.redraw_pending = true;
-            event_loop.set_control_flow(ControlFlow::Poll);
+            self.frame_scheduler.mark_dirty();
         }
         Ok(())
     }
 
     fn render_pending_frame(&mut self, event_loop: &ActiveEventLoop, window_id: WindowId) {
+        let now = self.scheduler_timestamp();
         let result = {
             let Some(renderer) = self.renderer.as_mut() else {
                 return;
@@ -731,7 +761,9 @@ impl Application {
         };
         match result {
             Ok(RenderOutcome::Presented) => {
-                self.redraw_pending = false;
+                self.surface_suspended = false;
+                self.frame_scheduler.presented(now);
+                self.metrics_presented_frames = self.metrics_presented_frames.saturating_add(1);
                 if self.has_presented_frame {
                     tracing::debug!(?window_id, "wgpu frame presented");
                 } else {
@@ -740,22 +772,70 @@ impl Application {
                 }
             }
             Ok(RenderOutcome::SkippedOccluded) => {
-                self.redraw_pending = !self.has_presented_frame;
-                event_loop.set_control_flow(if self.redraw_pending {
-                    ControlFlow::Poll
-                } else {
-                    ControlFlow::Wait
-                });
+                self.surface_suspended = true;
+                self.frame_scheduler.clear_dirty();
             }
             Ok(RenderOutcome::Reconfigured | RenderOutcome::SkippedTimeout) => {
-                self.redraw_pending = true;
-                event_loop.set_control_flow(ControlFlow::Poll);
-                if let Some(window) = self.window.as_ref() {
-                    window.request_redraw();
-                }
+                self.frame_scheduler.defer_redraw(now);
             }
             Err(error) => self.fail_and_exit(event_loop, error.into()),
         }
+    }
+
+    fn scheduler_timestamp(&self) -> Duration {
+        self.interaction_epoch
+            .map(|epoch| Instant::now().saturating_duration_since(epoch))
+            .unwrap_or_default()
+    }
+
+    fn reset_logic_timing(&mut self) {
+        self.last_logic_update = Some(Instant::now());
+        self.fixed_steps.reset();
+    }
+
+    fn frame_activity(&self) -> FrameActivity {
+        if self.window_occluded || self.surface_suspended || self.window.is_none() {
+            return FrameActivity::Static;
+        }
+        match self.state_machine.as_ref().map(PetStateMachine::state) {
+            Some(PetState::Idle) => FrameActivity::Idle,
+            Some(PetState::Sleeping) => FrameActivity::Sleeping,
+            Some(_) => FrameActivity::Active,
+            None => FrameActivity::Static,
+        }
+    }
+
+    fn brain_wall_deadline(&self, scheduler_now: Duration) -> Option<Duration> {
+        let remaining = self
+            .brain
+            .as_ref()?
+            .next_deadline()?
+            .saturating_sub(self.simulation_clock.now());
+        Some(scheduler_now + remaining)
+    }
+
+    fn report_runtime_metrics(&mut self, now: Instant, activity: FrameActivity) {
+        let Some(started) = self.metrics_period_started else {
+            self.metrics_period_started = Some(now);
+            return;
+        };
+        let elapsed = now.saturating_duration_since(started);
+        if elapsed < RUNTIME_METRICS_INTERVAL {
+            return;
+        }
+        let elapsed_seconds = elapsed.as_secs_f64();
+        tracing::info!(
+            mode = activity.label(),
+            target_fps = ?activity.target_fps(self.config.fps),
+            presented_fps = self.metrics_presented_frames as f64 / elapsed_seconds,
+            fixed_update_hz = self.metrics_fixed_steps as f64 / elapsed_seconds,
+            dropped_ms = self.metrics_dropped_time.as_secs_f64() * 1_000.0,
+            "runtime frame metrics"
+        );
+        self.metrics_period_started = Some(now);
+        self.metrics_presented_frames = 0;
+        self.metrics_fixed_steps = 0;
+        self.metrics_dropped_time = Duration::ZERO;
     }
 }
 
@@ -804,6 +884,8 @@ impl ApplicationHandler for Application {
                 self.platform_backend = None;
                 self.interaction_epoch = None;
                 self.last_logic_update = None;
+                self.fixed_steps.reset();
+                self.frame_scheduler.clear_dirty();
                 self.window = None;
             }
             WindowEvent::Resized(size) => {
@@ -817,17 +899,20 @@ impl ApplicationHandler for Application {
                 if let Some(renderer) = self.renderer.as_mut() {
                     renderer.resize(size);
                 }
+                let was_suspended = self.surface_suspended;
+                self.surface_suspended = size.width == 0 || size.height == 0;
                 self.update_pointer_hit();
                 if let Err(error) = self.sync_click_through() {
                     self.fail_and_exit(event_loop, error);
-                    return;
                 }
-                self.redraw_pending = size.width > 0 && size.height > 0;
-                event_loop.set_control_flow(if self.redraw_pending {
-                    ControlFlow::Poll
+                if self.surface_suspended {
+                    self.frame_scheduler.clear_dirty();
                 } else {
-                    ControlFlow::Wait
-                });
+                    if was_suspended {
+                        self.reset_logic_timing();
+                    }
+                    self.frame_scheduler.mark_dirty();
+                }
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
                 tracing::debug!(?window_id, scale_factor, "window scale factor changed");
@@ -836,7 +921,8 @@ impl ApplicationHandler for Application {
                 {
                     renderer.resize(window.inner_size());
                 }
-                self.redraw_pending = true;
+                self.surface_suspended = false;
+                self.frame_scheduler.mark_dirty();
                 if let Err(error) = self.refresh_monitors() {
                     self.fail_and_exit(event_loop, error);
                     return;
@@ -844,9 +930,7 @@ impl ApplicationHandler for Application {
                 self.update_pointer_hit();
                 if let Err(error) = self.sync_click_through() {
                     self.fail_and_exit(event_loop, error);
-                    return;
                 }
-                event_loop.set_control_flow(ControlFlow::Poll);
             }
             WindowEvent::CursorMoved { position, .. } => {
                 let window_origin = self
@@ -866,6 +950,7 @@ impl ApplicationHandler for Application {
                     if let Err(error) = self.sync_click_through() {
                         self.fail_and_exit(event_loop, error);
                     }
+                    self.frame_scheduler.mark_dirty();
                 }
             }
             WindowEvent::CursorLeft { .. } => {
@@ -874,6 +959,7 @@ impl ApplicationHandler for Application {
                 if let Err(error) = self.sync_click_through() {
                     self.fail_and_exit(event_loop, error);
                 }
+                self.frame_scheduler.mark_dirty();
             }
             WindowEvent::MouseInput {
                 state,
@@ -915,6 +1001,7 @@ impl ApplicationHandler for Application {
                 if let Err(error) = self.sync_click_through() {
                     self.fail_and_exit(event_loop, error);
                 }
+                self.frame_scheduler.mark_dirty();
             }
             WindowEvent::Focused(false) => {
                 tracing::info!(
@@ -930,13 +1017,26 @@ impl ApplicationHandler for Application {
                 if let Err(error) = self.refresh_pointer_from_platform() {
                     self.fail_and_exit(event_loop, error);
                 }
+                self.frame_scheduler.mark_dirty();
             }
             WindowEvent::ModifiersChanged(modifiers) => {
                 self.mouse_state.set_modifiers(modifiers.state());
+                self.frame_scheduler.mark_dirty();
+            }
+            WindowEvent::Occluded(occluded) => {
+                self.window_occluded = occluded;
+                if occluded {
+                    self.frame_scheduler.clear_dirty();
+                } else {
+                    self.surface_suspended = false;
+                    self.reset_logic_timing();
+                    self.frame_scheduler.mark_dirty();
+                }
+                tracing::info!(occluded, "window occlusion state changed");
             }
             WindowEvent::RedrawRequested => {
                 tracing::debug!(?window_id, "processing pending wgpu redraw");
-                if self.redraw_pending {
+                if self.frame_scheduler.is_dirty() {
                     self.render_pending_frame(event_loop, window_id);
                 }
             }
@@ -952,7 +1052,7 @@ impl ApplicationHandler for Application {
             {
                 if let PhysicalKey::Code(key) = event.physical_key {
                     self.apply_movement_command(key);
-                    event_loop.set_control_flow(ControlFlow::Poll);
+                    self.frame_scheduler.mark_dirty();
                 }
             }
             WindowEvent::KeyboardInput { event, .. }
@@ -968,11 +1068,39 @@ impl ApplicationHandler for Application {
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         let now = Instant::now();
-        if let Err(error) = self.run_fixed_updates(event_loop, now) {
+        let scheduler_now = self
+            .interaction_epoch
+            .map(|epoch| now.saturating_duration_since(epoch))
+            .unwrap_or_default();
+        let mut activity = self.frame_activity();
+        if self.frame_scheduler.set_activity(activity, scheduler_now) {
+            tracing::info!(
+                mode = activity.label(),
+                target_fps = ?activity.target_fps(self.config.fps),
+                "frame scheduler activity changed"
+            );
+        }
+        if activity == FrameActivity::Static {
+            self.last_logic_update = Some(now);
+            self.fixed_steps.reset();
+        } else if let Err(error) = self.run_fixed_updates(now) {
             self.fail_and_exit(event_loop, error);
             return;
         }
-        if self.redraw_pending
+        activity = self.frame_activity();
+        if self.frame_scheduler.set_activity(activity, scheduler_now) {
+            tracing::info!(
+                mode = activity.label(),
+                target_fps = ?activity.target_fps(self.config.fps),
+                "frame scheduler activity changed"
+            );
+        }
+        self.report_runtime_metrics(now, activity);
+        let brain_deadline = (activity != FrameActivity::Static)
+            .then(|| self.brain_wall_deadline(scheduler_now))
+            .flatten();
+        let decision = self.frame_scheduler.decision(scheduler_now, brain_deadline);
+        if decision.request_redraw
             && let Some(window) = self.window.as_ref()
         {
             let window_id = window.id();
@@ -981,15 +1109,12 @@ impl ApplicationHandler for Application {
                 self.redraw_request_logged = true;
             }
             window.request_redraw();
-            if !self.has_presented_frame {
-                self.render_pending_frame(event_loop, window_id);
-            }
         }
-        if !self.redraw_pending && self.last_logic_update.is_some() {
-            event_loop.set_control_flow(ControlFlow::WaitUntil(
-                now + self.fixed_steps.until_next_step(),
-            ));
-        }
+        let wake = decision.next_wake.and_then(|deadline| {
+            self.interaction_epoch
+                .map(|epoch| epoch.checked_add(deadline).unwrap_or(now))
+        });
+        event_loop.set_control_flow(wake.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
     }
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {

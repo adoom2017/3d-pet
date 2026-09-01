@@ -41,3 +41,9 @@ jobs:
 
       - name: Build workspace
         run: cargo build --workspace
+
+      - name: Run release tests
+        run: cargo test --workspace --release
+
+      - name: Build release workspace
+        run: cargo build --workspace --release

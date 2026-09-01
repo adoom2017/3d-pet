@@ -535,7 +535,7 @@ evidence/
 
 ## 17. Phase 14：性能与 MVP 验收
 
-**状态：`Ready`**
+**状态：`In Progress`**
 
 **目标：** 实现自适应帧调度和完全静止时按事件渲染，完成 macOS 性能、长时间稳定性和完整 MVP 验收，并验证 Windows CI 兼容性。
 
