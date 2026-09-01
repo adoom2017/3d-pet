@@ -7,7 +7,7 @@ use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
     event::{ElementState, MouseButton, WindowEvent},
-    event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
+    event_loop::{ActiveEventLoop, ControlFlow},
     keyboard::{KeyCode, PhysicalKey},
     window::{Window, WindowAttributes, WindowId, WindowLevel},
 };
@@ -195,7 +195,7 @@ impl Application {
 
     pub fn run(&mut self) -> Result<(), AppError> {
         tracing::debug!("creating winit event loop");
-        let event_loop = EventLoop::new()?;
+        let event_loop = platform::create_event_loop()?;
         tracing::debug!("winit event loop created");
         event_loop.set_control_flow(ControlFlow::Wait);
         event_loop.run_app(self)?;

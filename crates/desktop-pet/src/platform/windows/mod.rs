@@ -17,6 +17,7 @@ use windows_sys::Win32::{
 };
 use winit::{
     dpi::LogicalPosition,
+    event_loop::EventLoop,
     platform::windows::MonitorHandleExtWindows,
     raw_window_handle::{HasWindowHandle, RawWindowHandle},
     window::{Window, WindowAttributes, WindowLevel},
@@ -248,6 +249,10 @@ impl PlatformBackend for NativePlatformBackend {
 
 pub(super) fn configure_window_attributes(attributes: WindowAttributes) -> WindowAttributes {
     attributes
+}
+
+pub(super) fn create_event_loop() -> Result<EventLoop<()>, winit::error::EventLoopError> {
+    EventLoop::new()
 }
 
 #[cfg(test)]

@@ -9,7 +9,11 @@ use objc2_app_kit::{
 use objc2_foundation::MainThreadMarker;
 use winit::{
     dpi::LogicalPosition,
-    platform::macos::{MonitorHandleExtMacOS, WindowAttributesExtMacOS, WindowExtMacOS},
+    event_loop::EventLoop,
+    platform::macos::{
+        ActivationPolicy, EventLoopBuilderExtMacOS, MonitorHandleExtMacOS,
+        WindowAttributesExtMacOS, WindowExtMacOS,
+    },
     raw_window_handle::{HasWindowHandle, RawWindowHandle},
     window::{Window, WindowAttributes, WindowLevel},
 };
@@ -301,4 +305,13 @@ pub(super) fn configure_window_attributes(attributes: WindowAttributes) -> Windo
     attributes
         .with_has_shadow(false)
         .with_accepts_first_mouse(true)
+}
+
+pub(super) fn create_event_loop() -> Result<EventLoop<()>, winit::error::EventLoopError> {
+    let mut builder = EventLoop::builder();
+    builder
+        .with_activation_policy(ActivationPolicy::Accessory)
+        .with_default_menu(false)
+        .with_activate_ignoring_other_apps(false);
+    builder.build()
 }

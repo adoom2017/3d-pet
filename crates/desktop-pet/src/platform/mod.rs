@@ -3,7 +3,10 @@
 use std::sync::Arc;
 
 use thiserror::Error;
-use winit::window::{Window, WindowAttributes};
+use winit::{
+    event_loop::EventLoop,
+    window::{Window, WindowAttributes},
+};
 
 use crate::display::{DesktopPosition, MonitorInfo};
 
@@ -66,6 +69,10 @@ impl IdempotentBool {
 
 pub(crate) fn configure_window_attributes(attributes: WindowAttributes) -> WindowAttributes {
     implementation::configure_window_attributes(attributes)
+}
+
+pub(crate) fn create_event_loop() -> Result<EventLoop<()>, winit::error::EventLoopError> {
+    implementation::create_event_loop()
 }
 
 pub(crate) fn create_backend(window: Arc<Window>) -> Box<dyn PlatformBackend> {
