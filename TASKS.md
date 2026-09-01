@@ -470,7 +470,7 @@ evidence/
 
 ## 15. Phase 12：重力与落地
 
-**状态：`In Progress`**
+**状态：`Done`**
 
 **目标：** 拖动释放后完成 Falling -> Landing -> Idle，包含释放速度、重力积分和工作区地面夹紧。
 
@@ -480,11 +480,11 @@ evidence/
 
 **实现任务：**
 
-- [ ] 在固定 dt 下应用 release velocity、重力和位置积分，单位统一为逻辑像素/秒。
-- [ ] 使用活动显示器工作区计算地面；穿越地面时夹紧位置、清零垂直速度并 grounded。
-- [ ] 实现 Dragged -> Falling -> Landing -> Idle 的合法转换和动画降级策略。
-- [ ] 明确向上抛、向下释放、地面以下释放、超大真实时间间隔和显示器切换行为。
-- [ ] 使用多个 dt 序列验证近似一致的落地时间/位置，并测试无穿透和无无限 Falling。
+- [x] 在固定 dt 下应用 release velocity、重力和位置积分，单位统一为逻辑像素/秒。
+- [x] 使用活动显示器工作区计算地面；穿越地面时夹紧位置、清零垂直速度并 grounded。
+- [x] 实现 Dragged -> Falling -> Landing -> Idle 的合法转换和动画降级策略。
+- [x] 明确向上抛、向下释放、地面以下释放、超大真实时间间隔和显示器切换行为。
+- [x] 使用多个 dt 序列验证近似一致的落地时间/位置，并测试无穿透和无无限 Falling。
 
 **自动验证命令：** 执行四条全局门禁命令；运行 physics fixed-step、ground collision 和 state transition tests。
 
@@ -494,7 +494,7 @@ evidence/
 
 **Windows 实机验收：** 不要求；Windows 门禁仅为 CI 编译、Clippy、测试和构建通过。
 
-**产物与验证证据：** PhysicsBody 更新、落地状态转换和测试，`evidence/phase-12/verification.md`、macOS 录屏/状态日志和 CI URL。
+**产物与验证证据：** PhysicsBody 更新、落地状态转换和测试，`evidence/phase-12/verification.md`、macOS 人工验收记录和 CI URL。
 
 **阶段退出条件：** 所有 dt 与边界测试通过，macOS 无穿地/重复落地/卡死，全部门禁通过。
 
@@ -502,7 +502,7 @@ evidence/
 
 ## 16. Phase 13：Look At Mouse
 
-**状态：`Blocked`**
+**状态：`Ready`**
 
 **目标：** 在基础动画后向 head joint 叠加受限、平滑、与 FPS 无关的 yaw / pitch。
 
