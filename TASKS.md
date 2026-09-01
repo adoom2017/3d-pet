@@ -502,7 +502,7 @@ evidence/
 
 ## 16. Phase 13：Look At Mouse
 
-**状态：`Ready`**
+**状态：`In Progress`**
 
 **目标：** 在基础动画后向 head joint 叠加受限、平滑、与 FPS 无关的 yaw / pitch。
 

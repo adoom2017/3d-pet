@@ -8,7 +8,13 @@
     "walk": "Walk"
   },
   "skeleton": {
-    "head_joint": "Head"
+    "head_joint": "Head",
+    "look_at": {
+      "yaw_axis": [0.0, 1.0, 0.0],
+      "pitch_axis": [1.0, 0.0, 0.0],
+      "yaw_sign": 1.0,
+      "pitch_sign": 1.0
+    }
   },
   "source": {
     "author": "Quaternius",

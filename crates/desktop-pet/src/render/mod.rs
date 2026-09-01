@@ -122,6 +122,28 @@ pub(crate) struct PetProjection {
     pub scale_factor: f64,
 }
 
+impl PetProjection {
+    pub fn model_to_window_logical(self, point: Vec3) -> Option<[f64; 2]> {
+        if !point.is_finite()
+            || self.viewport.width == 0
+            || self.viewport.height == 0
+            || !self.scale_factor.is_finite()
+            || self.scale_factor <= 0.0
+        {
+            return None;
+        }
+        let clip = self.clip_from_model * point.extend(1.0);
+        if !clip.is_finite() || clip.w <= f32::EPSILON {
+            return None;
+        }
+        let ndc = clip.truncate() / clip.w;
+        Some([
+            f64::from((ndc.x + 1.0) * 0.5) * f64::from(self.viewport.width) / self.scale_factor,
+            f64::from((1.0 - ndc.y) * 0.5) * f64::from(self.viewport.height) / self.scale_factor,
+        ])
+    }
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct MaterialUniform {
@@ -1123,6 +1145,33 @@ mod tests {
             1.0,
         );
         assert_ne!(right.model, left.model);
+    }
+
+    #[test]
+    fn model_point_projection_returns_window_logical_coordinates() {
+        let projection = PetProjection {
+            bounds_min: Vec3::splat(-1.0),
+            bounds_max: Vec3::splat(1.0),
+            clip_from_model: Mat4::IDENTITY,
+            viewport: DesktopPhysicalSize::new(640, 320),
+            scale_factor: 2.0,
+        };
+        assert_eq!(
+            projection.model_to_window_logical(Vec3::ZERO),
+            Some([160.0, 80.0])
+        );
+        assert_eq!(
+            projection.model_to_window_logical(Vec3::new(1.0, 1.0, 0.0)),
+            Some([320.0, 0.0])
+        );
+        assert!(
+            PetProjection {
+                scale_factor: 0.0,
+                ..projection
+            }
+            .model_to_window_logical(Vec3::ZERO)
+            .is_none()
+        );
     }
 
     #[test]

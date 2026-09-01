@@ -107,6 +107,23 @@ pub(crate) struct AnimationManifest {
 #[serde(deny_unknown_fields)]
 pub(crate) struct SkeletonManifest {
     pub head_joint: Option<String>,
+    #[serde(default)]
+    pub look_at: Option<LookAtManifest>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct LookAtManifest {
+    pub yaw_axis: [f32; 3],
+    pub pitch_axis: [f32; 3],
+    #[serde(default = "positive_one")]
+    pub yaw_sign: f32,
+    #[serde(default = "positive_one")]
+    pub pitch_sign: f32,
+}
+
+const fn positive_one() -> f32 {
+    1.0
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -144,6 +161,7 @@ impl LocalTransform {
 
 #[derive(Clone, Debug)]
 pub(crate) struct NodeData {
+    pub name: Option<String>,
     pub parent: Option<usize>,
     pub bind_transform: LocalTransform,
 }
@@ -450,6 +468,7 @@ fn read_rig(document: &gltf::Document, blob: &[u8]) -> Result<RigData, AssetErro
         .map(|node| {
             let (translation, rotation, scale) = node.transform().decomposed();
             NodeData {
+                name: node.name().map(str::to_owned),
                 parent: None,
                 bind_transform: LocalTransform {
                     translation: Vec3::from(translation),
@@ -763,6 +782,19 @@ mod tests {
 
         assert_eq!(pet.manifest.id, "quaternius_fox");
         assert_eq!(pet.manifest.skeleton.head_joint.as_deref(), Some("Head"));
+        let look_at = pet
+            .manifest
+            .skeleton
+            .look_at
+            .expect("default pet must configure look-at axes");
+        assert_eq!(look_at.yaw_axis, [0.0, 1.0, 0.0]);
+        assert_eq!(look_at.pitch_axis, [1.0, 0.0, 0.0]);
+        assert!(
+            pet.rig
+                .nodes
+                .iter()
+                .any(|node| node.name.as_deref() == Some("Head"))
+        );
         assert!(pet.animation_names.contains("Idle"));
         assert!(pet.animation_names.contains("Walk"));
         assert!(!pet.animations["Idle"].channels.is_empty());

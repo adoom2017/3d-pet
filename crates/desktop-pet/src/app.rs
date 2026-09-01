@@ -13,7 +13,7 @@ use winit::{
 };
 
 use crate::{
-    animation::{AnimationController, AnimationRequest},
+    animation::{AnimationController, AnimationRequest, LookTarget},
     asset::{AssetManager, default_asset_root, default_manifest_path},
     config::AppConfig,
     display::{
@@ -648,6 +648,33 @@ impl Application {
         }
     }
 
+    fn update_look_target(&mut self) {
+        let target = self
+            .animation
+            .as_ref()
+            .and_then(AnimationController::head_model_position)
+            .zip(self.renderer.as_ref().and_then(|renderer| {
+                let scale_factor = self.window.as_ref()?.scale_factor();
+                renderer.pet_projection(scale_factor)
+            }))
+            .and_then(|(head, projection)| projection.model_to_window_logical(head))
+            .zip(self.mouse_state.window_logical_position)
+            .and_then(|(head, mouse)| {
+                LookTarget::from_window_points(head, mouse, PET_WINDOW_LOGICAL_SIZE * 0.5)
+            })
+            .map(|mut target| {
+                if self.state_machine.as_ref().map(PetStateMachine::facing)
+                    == Some(HorizontalDirection::Right)
+                {
+                    target.yaw_radians = -target.yaw_radians;
+                }
+                target
+            });
+        if let Some(animation) = self.animation.as_mut() {
+            animation.set_look_target(target);
+        }
+    }
+
     fn run_fixed_updates(
         &mut self,
         event_loop: &ActiveEventLoop,
@@ -675,6 +702,7 @@ impl Application {
                 self.refresh_monitors()?;
             }
             self.update_behavior();
+            self.update_look_target();
             if let Some(animation) = self.animation.as_mut() {
                 animation
                     .advance(FIXED_UPDATE_INTERVAL)
