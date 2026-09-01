@@ -502,7 +502,7 @@ evidence/
 
 ## 16. Phase 13：Look At Mouse
 
-**状态：`In Progress`**
+**状态：`Done`**
 
 **目标：** 在基础动画后向 head joint 叠加受限、平滑、与 FPS 无关的 yaw / pitch。
 
@@ -512,12 +512,12 @@ evidence/
 
 **实现任务：**
 
-- [ ] 从宠物头部和鼠标桌面位置构造 LookTarget，转换失败时禁用本帧叠加。
-- [ ] 在基础 clip/Cross Fade 后应用 yaw `[-40, 40]`、pitch `[-20, 25]` 度限制。
-- [ ] 用固定 dt 的指数平滑或等价 seek-safe 方法逼近目标，避免 overshoot 和 FPS 依赖。
-- [ ] 保持骨骼局部轴约定可配置，避免硬编码模型特定轴散落在动画逻辑中。
-- [ ] head joint 缺失时每次资源加载只 warning 一次并保持基础动画可用。
-- [ ] 测试角度 clamp、中心点、四象限、平滑收敛、目标丢失和缺失 joint。
+- [x] 从宠物头部和鼠标桌面位置构造 LookTarget，转换失败时禁用本帧叠加。
+- [x] 在基础 clip/Cross Fade 后应用 yaw `[-40, 40]`、pitch `[-20, 25]` 度限制。
+- [x] 用固定 dt 的指数平滑或等价 seek-safe 方法逼近目标，避免 overshoot 和 FPS 依赖。
+- [x] 保持骨骼局部轴约定可配置，避免硬编码模型特定轴散落在动画逻辑中。
+- [x] head joint 缺失时每次资源加载只 warning 一次并保持基础动画可用。
+- [x] 测试角度 clamp、中心点、四象限、平滑收敛、目标丢失和缺失 joint。
 
 **自动验证命令：** 执行四条全局门禁命令；运行 look-at math、smoothing 和 pose-overlay tests。
 
@@ -527,7 +527,7 @@ evidence/
 
 **Windows 实机验收：** 不要求；Windows 门禁仅为 CI 编译、Clippy、测试和构建通过。
 
-**产物与验证证据：** LookTarget、程序化 pose layer、manifest joint 配置和测试，`evidence/phase-13/verification.md`、macOS 录屏和 CI URL。
+**产物与验证证据：** LookTarget、程序化 pose layer、manifest joint 配置和测试，`evidence/phase-13/verification.md`、macOS 人工验收记录和 CI URL。
 
 **阶段退出条件：** 数值限制和收敛测试通过，macOS 视觉无异常，缺失 joint 能安全降级，全部门禁通过。
 
@@ -535,7 +535,7 @@ evidence/
 
 ## 17. Phase 14：性能与 MVP 验收
 
-**状态：`Blocked`**
+**状态：`Ready`**
 
 **目标：** 实现自适应帧调度和完全静止时按事件渲染，完成 macOS 性能、长时间稳定性和完整 MVP 验收，并验证 Windows CI 兼容性。
 
