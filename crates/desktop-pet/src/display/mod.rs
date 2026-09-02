@@ -377,6 +377,22 @@ mod tests {
         );
     }
 
+    #[test]
+    fn constraining_a_far_offscreen_position_recovers_to_the_primary_work_area() {
+        let manager = DisplayManager::new(vec![
+            monitor(1, 0.0, 20.0, 1_000.0, 780.0, 2.0, true),
+            monitor(2, 1_000.0, -100.0, 1_200.0, 900.0, 2.0, false),
+        ]);
+
+        assert_eq!(
+            manager.constrain_position(
+                DesktopPosition::new(-3_291.0, 900.0),
+                LogicalSize::new(320.0, 320.0),
+            ),
+            DesktopPosition::new(0.0, 480.0)
+        );
+    }
+
     fn monitor(
         id: u64,
         x: f64,

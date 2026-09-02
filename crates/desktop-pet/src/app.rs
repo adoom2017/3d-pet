@@ -372,10 +372,11 @@ impl Application {
             .movement
             .as_mut()
             .ok_or_else(|| AppError::Platform("movement controller is unavailable".to_owned()))?;
-        let ground_y = self
+        let display_manager = self
             .display_manager
             .as_ref()
-            .ok_or_else(|| AppError::Platform("display manager is unavailable".to_owned()))?
+            .ok_or_else(|| AppError::Platform("display manager is unavailable".to_owned()))?;
+        let ground_y = display_manager
             .ground_y(movement.position(), window_size)
             .ok_or_else(|| AppError::Platform("no active monitor is available".to_owned()))?;
         let platform_backend = self
@@ -386,15 +387,16 @@ impl Application {
             FIXED_UPDATE_INTERVAL,
             ground_y,
             |proposed| {
+                let confirmed = display_manager.constrain_position(proposed, window_size);
                 platform_backend
-                    .set_window_position(proposed)
+                    .set_window_position(confirmed)
                     .map_err(|error| {
                         AppError::Platform(format!(
                             "failed to move the falling window to logical position ({:.3}, {:.3}): {error}",
-                            proposed.x, proposed.y
+                            confirmed.x, confirmed.y
                         ))
                     })?;
-                Ok::<_, AppError>((proposed, proposed))
+                Ok::<_, AppError>((confirmed, confirmed))
             },
         )?;
         let Some((position, landed)) = advanced else {
@@ -736,8 +738,13 @@ impl Application {
             );
             self.last_backlog_warning = Some(now);
         }
-        for _ in 0..batch.steps {
+        // CursorMoved events already update the local and desktop coordinates. A single global
+        // refresh per event-loop turn covers event coalescing and drag releases without issuing
+        // an AppKit mouseLocation query for every fixed simulation step.
+        if batch.steps > 0 {
             self.refresh_pointer_from_platform()?;
+        }
+        for _ in 0..batch.steps {
             self.monitor_refresh_elapsed = self
                 .monitor_refresh_elapsed
                 .saturating_add(FIXED_UPDATE_INTERVAL);
